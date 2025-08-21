@@ -1,5 +1,3 @@
-
-
 import { Card, CardActionArea, Typography } from '@mui/material';
 import { motion, Variants } from 'framer-motion';
 import { Category } from '../types';
@@ -11,7 +9,6 @@ interface CategoryCardProps {
   onClick: () => void;
 }
 
-
 const cardVariants: Variants = {
   initial: { scale: 0.9, opacity: 0 },
   animate: { scale: 1, opacity: 1, transition: { duration: 0.4, ease: "easeOut" } },
@@ -19,9 +16,9 @@ const cardVariants: Variants = {
 };
 
 const CategoryCard = ({ category, isSelected, onClick }: CategoryCardProps) => {
-
-
-  const iconKey = category.name.toLowerCase().split(' ')[0];
+  // --- LÓGICA DE ICONO MEJORADA ---
+  // Prioriza el icon_name guardado. Si no existe, intenta con el nombre de la categoría (para retrocompatibilidad).
+  const iconKey = category.icon_name || category.name.toLowerCase().split(' ')[0];
   const Icon = iconMap[iconKey] || iconMap.default;
 
   return (

@@ -39,7 +39,12 @@ export interface Appointment {
   employee_id?: string | null;
 }
 
-export type Category = { id?: string; _id?: string; name: string };
+export type Category = { 
+  id?: string; 
+  _id?: string; 
+  name: string;
+  icon_name?: string; 
+};
 
 export type Employee = {
   id: string;

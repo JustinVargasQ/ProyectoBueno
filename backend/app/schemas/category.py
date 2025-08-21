@@ -1,4 +1,3 @@
-
 from pydantic import BaseModel, Field, field_validator
 from typing import Optional, List, Any
 from .utils import PyObjectId
@@ -7,12 +6,14 @@ from datetime import datetime
 
 class CategoryBase(BaseModel):
     name: str = Field(..., min_length=3, max_length=50)
+    icon_name: Optional[str] = None
 
 class CategoryCreate(CategoryBase):
     pass
 
 class CategoryUpdate(BaseModel):
     name: Optional[str] = Field(None, min_length=3, max_length=50)
+    icon_name: Optional[str] = None
 
 class Category(CategoryBase):
     id: str = Field(..., alias="_id")

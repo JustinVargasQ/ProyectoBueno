@@ -1,22 +1,8 @@
-
-
 import { SvgIcon } from '@mui/material';
-
 import SvgIconComponent from '@mui/material/SvgIcon';
+import * as MuiIcons from '@mui/icons-material';
 
-import ContentCutIcon from '@mui/icons-material/ContentCut';
-import BrushIcon from '@mui/icons-material/Brush';
-import FaceRetouchingNaturalIcon from '@mui/icons-material/FaceRetouchingNatural';
-import SpaIcon from '@mui/icons-material/Spa';
-import StorefrontIcon from '@mui/icons-material/Storefront';
-import StarIcon from '@mui/icons-material/Star';
-import StarBorderIcon from '@mui/icons-material/StarBorder';
-import PeopleIcon from '@mui/icons-material/People';
-import LocationOnIcon from '@mui/icons-material/LocationOn';
-import SearchIcon from '@mui/icons-material/Search';
-
-
-
+// --- ÍCONO DE GOOGLE RESTAURADO ---
 export function GoogleIcon() {
   return (
     <SvgIcon>
@@ -48,57 +34,17 @@ export function GoogleIcon() {
   );
 }
 
-export function FacebookIcon() {
-  return (
-    <SvgIcon>
-      <svg
-        width="16"
-        height="16"
-        viewBox="0 0 16 16"
-        fill="none"
-        xmlns="http://www.w3.org/2000/svg"
-      >
-        <path
-          d="M6.68 15.92C2.88 15.24 0 11.96 0 8C0 3.6 3.6 0 8 0C12.4 0 16 3.6 16 8C16 11.96 13.12 15.24 9.32 15.92L8.88 15.56H7.12L6.68 15.92Z"
-          fill="url(#paint0_linear_795_116)"
-        />
-        <path
-          d="M11.12 10.2391L11.48 7.99914H9.36V6.43914C9.36 5.79914 9.6 5.31914 10.56 5.31914H11.6V3.27914C11.04 3.19914 10.4 3.11914 9.84 3.11914C8 3.11914 6.72 4.23914 6.72 6.23914V7.99914H4.72V10.2391H6.72V15.8791C7.16 15.9591 7.6 15.9991 8.04 15.9991C8.48 15.9991 8.92 15.9591 9.36 15.8791V10.2391H11.12Z"
-          fill="white"
-        />
-        <defs>
-          <linearGradient
-            id="paint0_linear_795_116"
-            x1="8"
-            y1="0"
-            x2="8"
-            y2="15.9991"
-            gradientUnits="userSpaceOnUse"
-          >
-            <stop stopColor="#1AAFFF" />
-            <stop offset="1" stopColor="#0163E0" />
-          </linearGradient>
-        </defs>
-      </svg>
-    </SvgIcon>
-  );
-}
-
-
-
+// --- MAPA DE ICONOS DINÁMICO ---
+// Ahora 'iconMap' tiene acceso a todos los iconos de @mui/icons-material
 export const iconMap: { [key: string]: typeof SvgIconComponent } = {
-  'barbería': ContentCutIcon,
-  'tatuajes': BrushIcon,
-  'belleza': FaceRetouchingNaturalIcon,
-  'spa': SpaIcon,
-  'default': StorefrontIcon
+  ...(MuiIcons as { [key: string]: typeof SvgIconComponent }), // Expande todos los iconos importados
+  'default': MuiIcons.Storefront, // Mantiene un ícono por defecto
 };
 
-
-export {
-    StarIcon,
-    StarBorderIcon,
-    PeopleIcon,
-    LocationOnIcon,
-    SearchIcon,
-};
+// --- CORRECCIÓN: Exportamos los iconos individualmente ---
+// Esto permite que otros archivos los importen de forma segura sin errores de TypeScript
+export const StarIcon = MuiIcons.Star;
+export const StarBorderIcon = MuiIcons.StarBorder;
+export const PeopleIcon = MuiIcons.People;
+export const LocationOnIcon = MuiIcons.LocationOn;
+export const SearchIcon = MuiIcons.Search;

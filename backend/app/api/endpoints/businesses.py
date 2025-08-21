@@ -2,15 +2,25 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from typing import List, Dict, Any, Optional
 from motor.motor_asyncio import AsyncIOMotorDatabase
 from bson import ObjectId
+from pydantic import BaseModel
+import google.generativeai as genai
 
 from app.db.session import get_database
 from app.crud import crud_business
 from app.schemas.business import BusinessCreate, BusinessUpdate, BusinessResponse, Schedule
 from app.schemas.user import UserResponse
 from app.core.security import get_current_user
+from app.core.config import settings # Importar settings
 
 router = APIRouter()
 
+# --- Modelos Pydantic para el nuevo endpoint ---
+class GenerateDescriptionRequest(BaseModel):
+    name: str
+    categories: List[str]
+    keywords: Optional[str] = None
+
+# --- Funciones de ayuda ---
 def convert_business_to_response(business: Dict[str, Any]) -> Dict[str, Any]:
     return {
         "id": str(business["_id"]),
@@ -26,6 +36,7 @@ def convert_business_to_response(business: Dict[str, Any]) -> Dict[str, Any]:
         "appointment_mode": business.get("appointment_mode", "generico"),
     }
 
+# --- Endpoints existentes ---
 @router.get("/", response_model=List[BusinessResponse])
 async def get_all_published_businesses(db: AsyncIOMotorDatabase = Depends(get_database)):
     businesses_from_db = await crud_business.get_published_businesses(db)
@@ -114,3 +125,38 @@ async def get_available_slots(
         return slots
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
+
+@router.post("/generate-description", response_model=Dict[str, str])
+async def generate_business_description(
+    request: GenerateDescriptionRequest,
+    current_user: UserResponse = Depends(get_current_user)
+):
+    """
+    Genera una descripción de negocio usando Gemini.
+    """
+    try:
+        api_key = settings.GOOGLE_API_KEY
+        if not api_key:
+            raise HTTPException(status_code=500, detail="La clave de API de Google no está configurada.")
+        
+        genai.configure(api_key=api_key)
+        model = genai.GenerativeModel('gemini-1.5-flash-latest')
+
+        prompt_parts = [
+            f"Eres un experto en marketing. Genera una descripción atractiva y profesional para un negocio en español.",
+            f"Nombre del negocio: '{request.name}'",
+            f"Categorías: {', '.join(request.categories)}"
+        ]
+        if request.keywords:
+            prompt_parts.append(f"Palabras clave para inspirarte: {request.keywords}")
+        
+        prompt_parts.append("La descripción debe ser concisa, vendedora y no exceder los 250 caracteres.")
+
+        prompt = "\n".join(prompt_parts)
+
+        response = model.generate_content(prompt)
+        return {"description": response.text}
+
+    except Exception as e:
+        print(f"Error con la API de Gemini: {e}")
+        raise HTTPException(status_code=500, detail="Error al generar la descripción con IA.")

@@ -4,6 +4,8 @@ import { Business, Appointment, Employee } from '@/types';
 import { useAuth } from '@/hooks/useAuth';
 import { ExtendedPage } from '@/App';
 import { LocationDisplay } from '@/components/LocationDisplay';
+import { Chatbot } from '@/components/Chatbot';
+import AutoAwesomeIcon from '@mui/icons-material/AutoAwesome';
 
 import {
   Box, Typography, Button, Paper, CircularProgress, Divider, TextField, IconButton,
@@ -223,7 +225,6 @@ const BookingModal: React.FC<{
 
         {error && <Alert severity="error" sx={{ my: 2 }}>{error}</Alert>}
 
-        {}
         <Box sx={{ mb: 3 }}>
           <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 1 }}>
             <CalendarMonthIcon /><Typography fontWeight={700}>1. Elige una fecha</Typography>
@@ -237,7 +238,6 @@ const BookingModal: React.FC<{
           />
         </Box>
 
-        {}
         {needEmployee && (
           <Box sx={{ mb: 3 }}>
             <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 1 }}>
@@ -264,7 +264,6 @@ const BookingModal: React.FC<{
           </Box>
         )}
 
-        {}
         <Box>
           <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 1 }}>
             <AccessTimeIcon /><Typography fontWeight={700}>3. Elige una hora disponible</Typography>
@@ -470,20 +469,18 @@ const ReviewsSection: React.FC<{
         <Typography variant="h5" fontWeight={700}>Reseñas</Typography>
       </Stack>
 
-      {}
       <Stack direction="row" alignItems="center" spacing={1} sx={{ mb: 2 }}>
         <Rating value={avg} precision={0.1} readOnly />
         <Typography fontWeight={700}>{avg.toFixed(1)}</Typography>
         <Typography color="text.secondary">· {reviews.length} reseña{reviews.length !== 1 ? 's' : ''}</Typography>
       </Stack>
 
-      {}
       {uiCanReview ? (
         <Paper variant="outlined" sx={{ p: 2, mb: 2, borderRadius: 2 }}>
           <Stack spacing={1.5}>
             <Stack direction="row" alignItems="center" spacing={1}>
               <Avatar
-                src={user?.profile_picture_url ?? undefined} // <-- FIX
+                src={user?.profile_picture_url ?? undefined}
                 alt={user?.full_name || user?.email || 'Usuario'}
               >
                 {(user?.full_name || user?.email || 'U').charAt(0).toUpperCase()}
@@ -518,7 +515,6 @@ const ReviewsSection: React.FC<{
         </Alert>
       )}
 
-      {}
       {loading ? (
         <Box sx={{ textAlign: 'center', py: 3 }}><CircularProgress size={22} /></Box>
       ) : reviews.length === 0 ? (
@@ -590,8 +586,8 @@ export const BusinessDetailsPage: React.FC<BusinessDetailsPageProps> = ({ busine
   const [showBookingModal, setShowBookingModal] = useState(false);
   const [confirmedAppointment, setConfirmedAppointment] = useState<Appointment | null>(null);
   const [currentImageIndex, setCurrentImageIndex] = useState(0);
-
   const [canReview, setCanReview] = useState(false);
+  const [showChatbot, setShowChatbot] = useState(false);
 
   const fetchDetails = useCallback(async () => {
     setIsLoading(true);
@@ -654,6 +650,7 @@ export const BusinessDetailsPage: React.FC<BusinessDetailsPageProps> = ({ busine
   const goToPrevious = () => setCurrentImageIndex(prev => (prev === 0 ? allImages.length - 1 : prev - 1));
   const goToNext = () => setCurrentImageIndex(prev => (prev === allImages.length - 1 ? 0 : prev + 1));
 
+
   if (isLoading) return <Box sx={{ textAlign: 'center', p: 4 }}><CircularProgress /></Box>;
   if (!business) return <Box sx={{ textAlign: 'center', p: 4 }}><Typography>Negocio no encontrado.</Typography></Box>;
 
@@ -676,6 +673,35 @@ export const BusinessDetailsPage: React.FC<BusinessDetailsPageProps> = ({ busine
           navigateTo={navigateTo}
         />
       )}
+      
+      <IconButton
+        color="primary"
+        sx={{
+          position: 'fixed',
+          bottom: 24,
+          right: 24,
+          bgcolor: 'primary.main',
+          color: 'white',
+          width: 64,
+          height: 64,
+          zIndex: 1200,
+          '&:hover': { bgcolor: 'primary.dark', transform: 'scale(1.1)' },
+          boxShadow: 6,
+          transition: 'transform 0.2s ease-in-out'
+        }}
+        onClick={() => setShowChatbot(!showChatbot)}
+        title="Asistente de Citas IA"
+      >
+        <AutoAwesomeIcon fontSize="large" />
+      </IconButton>
+      
+      {showChatbot && token && (
+        <Chatbot 
+          businessId={businessId} 
+          businessName={(business as any).name} 
+          navigateTo={navigateTo} 
+        />
+      )}
 
       <Paper elevation={4} sx={{
         display: 'grid',
@@ -684,7 +710,6 @@ export const BusinessDetailsPage: React.FC<BusinessDetailsPageProps> = ({ busine
         p: { xs: 2, md: 4 },
         borderRadius: 4
       }}>
-        {}
         <Box sx={{ position: 'relative', width: '100%', height: { xs: 300, md: 450 }, borderRadius: 2, overflow: 'hidden' }}>
           {allImages.length > 1 && (
             <>
@@ -703,7 +728,6 @@ export const BusinessDetailsPage: React.FC<BusinessDetailsPageProps> = ({ busine
           />
         </Box>
 
-        {}
         <Box>
           <Typography color="text.secondary" fontWeight="bold" textTransform="uppercase">
             {((business as any).categories || []).join(', ') || 'Sin Categoría'}
@@ -746,7 +770,6 @@ export const BusinessDetailsPage: React.FC<BusinessDetailsPageProps> = ({ busine
         </Box>
       </Paper>
 
-      {}
       <ReviewsSection businessId={bizIdOf(business as any)} canReview={canReview} />
     </Box>
   );

@@ -17,4 +17,5 @@ fpdf2
 qrcode[pil]==7.4.2
 emails
 Jinja2
-reportlab==4.4.3       
+reportlab==4.4.3
+google-generativeai

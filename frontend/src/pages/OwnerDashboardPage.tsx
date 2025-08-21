@@ -1,4 +1,3 @@
-
 import React, { useState, useEffect, useCallback } from 'react';
 import { useAuth } from '@/hooks/useAuth';
 import { API_BASE_URL } from '@/services/api';
@@ -20,6 +19,7 @@ import PublishIcon from '@mui/icons-material/Publish';
 import AddCircleOutlineIcon from '@mui/icons-material/AddCircleOutline';
 import DeleteIcon from '@mui/icons-material/Delete';
 import PeopleIcon from '@mui/icons-material/People';
+import AutoAwesomeIcon from '@mui/icons-material/AutoAwesome'; // Icono para IA
 
 type AppointmentMode = 'generico' | 'por_empleado';
 
@@ -341,9 +341,10 @@ const BusinessEditForm: React.FC<{ business: Business; onSave: () => void; onCan
   const [error, setError] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const [hoveredPhoto, setHoveredPhoto] = useState<string | null>(null);
+  const [keywords, setKeywords] = useState('');
+  const [isGenerating, setIsGenerating] = useState(false);
 
   const mode = (formData as any).appointment_mode as AppointmentMode || 'generico';
-
   const allBusinessPhotos = Array.from(new Set([...(formData.logo_url ? [formData.logo_url] : []), ...formData.photos]));
 
   const handleSetAsMain = (photoUrl: string) => {
@@ -389,6 +390,35 @@ const BusinessEditForm: React.FC<{ business: Business; onSave: () => void; onCan
       : [...current, categoryName];
     setFormData({ ...(formData as any), categories: newCategories });
   };
+  
+  const handleGenerateDescription = async () => {
+    setIsGenerating(true);
+    setError('');
+    try {
+      const response = await fetch(`${API_BASE_URL}/businesses/generate-description`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`,
+        },
+        body: JSON.stringify({
+          name: formData.name,
+          categories: formData.categories || [],
+          keywords: keywords,
+        }),
+      });
+
+      const data = await response.json();
+      if (!response.ok) {
+        throw new Error(data.detail || 'No se pudo generar la descripción.');
+      }
+      setFormData(prev => ({ ...(prev as any), description: data.description }));
+    } catch (err: any) {
+      setError(err.message);
+    } finally {
+      setIsGenerating(false);
+    }
+  };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -431,8 +461,6 @@ const BusinessEditForm: React.FC<{ business: Business; onSave: () => void; onCan
             <LocationPicker onLocationSelect={handleLocationSelect} initialAddress={formData.address} />
             <TextField label="Dirección Seleccionada" value={formData.address} InputProps={{readOnly: true}} fullWidth sx={{mt: 2}} />
           </Box>
-
-          {}
           <FormControl fullWidth>
             <InputLabel id="mode-label">Modo de citas</InputLabel>
             <Select
@@ -448,8 +476,34 @@ const BusinessEditForm: React.FC<{ business: Business; onSave: () => void; onCan
               <MenuItem value="por_empleado">Citas por empleado (cliente elige empleado)</MenuItem>
             </Select>
           </FormControl>
-
+          
           <TextField label="Descripción" value={formData.description} onChange={(e: React.ChangeEvent<HTMLInputElement>) => setFormData({...formData, description: e.target.value} as any)} required multiline rows={4} fullWidth />
+
+          <Paper variant="outlined" sx={{ p: 2, borderRadius: 2 }}>
+            <Typography variant="body2" fontWeight="bold" gutterBottom>
+              Asistente de IA
+            </Typography>
+            <Stack direction={{xs: 'column', sm: 'row'}} spacing={2} alignItems="center">
+              <TextField
+                label="Palabras clave (opcional)"
+                placeholder="Ej: familiar, elegante, moderno"
+                value={keywords}
+                onChange={(e) => setKeywords(e.target.value)}
+                fullWidth
+                size="small"
+                helperText="Ayuda a la IA a entender mejor tu negocio."
+              />
+              <Button
+                variant="contained"
+                startIcon={<AutoAwesomeIcon />}
+                onClick={handleGenerateDescription}
+                disabled={isGenerating || !formData.name}
+                sx={{ flexShrink: 0 }}
+              >
+                {isGenerating ? 'Generando...' : 'Generar Descripción'}
+              </Button>
+            </Stack>
+          </Paper>
 
           <Box>
             <Typography fontWeight="600" gutterBottom>Categorías</Typography>

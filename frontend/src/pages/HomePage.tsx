@@ -1,14 +1,11 @@
-
-
-import React, { useState, useEffect } from 'react';
-
+import React, { useState, useEffect, useMemo } from 'react';
 import {
     Typography, Box, TextField, Button, Paper, InputAdornment, CircularProgress,
     Card, CardMedia, CardContent, CardActions
 } from '@mui/material';
 import { GoogleMap, Marker, InfoWindow } from '@react-google-maps/api';
 
-import { Search as SearchIcon, LocationOn as LocationOnIcon } from '@mui/icons-material';
+import { Search as SearchIcon } from '@mui/icons-material';
 import { motion, AnimatePresence, Variants } from 'framer-motion';
 
 import CategoryCard from '../components/CategoryCard';
@@ -42,16 +39,20 @@ const itemVariants: Variants = { hidden: { y: 20, opacity: 0 }, visible: { y: 0,
 
 
 export const HomePage: React.FC<{ navigateTo: (page: ExtendedPage, businessId?: string) => void; }> = ({ navigateTo }) => {
-    const [businesses, setBusinesses] = useState<Business[]>([]);
+    const [allBusinesses, setAllBusinesses] = useState<Business[]>([]);
+    const [filteredBusinesses, setFilteredBusinesses] = useState<Business[]>([]);
     const [categories, setCategories] = useState<Category[]>([]);
     const [selectedCategory, setSelectedCategory] = useState<string | null>(null);
     const [isLoading, setIsLoading] = useState(true);
     const [error, setError] = useState<string | null>(null);
+    const [searchQuery, setSearchQuery] = useState('');
     
-
     const [locations, setLocations] = useState<BusinessLocation[]>([]);
     const [selectedLocation, setSelectedLocation] = useState<BusinessLocation | null>(null);
     const [isMapLoading, setIsMapLoading] = useState(true);
+
+    const [mapCenter, setMapCenter] = useState(costaRicaCenter);
+    const [mapZoom, setMapZoom] = useState(7.5);
 
     useEffect(() => {
         const fetchInitialData = async () => {
@@ -68,7 +69,8 @@ export const HomePage: React.FC<{ navigateTo: (page: ExtendedPage, businessId?: 
                 const businessesData = await businessesResponse.json();
                 const categoriesData = await categoriesResponse.json();
 
-                setBusinesses(businessesData);
+                setAllBusinesses(businessesData);
+                setFilteredBusinesses(businessesData);
                 setCategories(categoriesData);
             } catch (err: any) {
                 setError(err.message);
@@ -81,10 +83,10 @@ export const HomePage: React.FC<{ navigateTo: (page: ExtendedPage, businessId?: 
 
 
     useEffect(() => {
-        if (businesses.length > 0 && window.google) {
+        if (allBusinesses.length > 0 && window.google) {
             setIsMapLoading(true);
             const geocoder = new window.google.maps.Geocoder();
-            const geocodePromises = businesses.map(business => 
+            const geocodePromises = allBusinesses.map(business => 
                 new Promise<BusinessLocation | null>((resolve) => {
                     geocoder.geocode({ address: business.address }, (results, status) => {
                         if (status === 'OK' && results?.[0]) {
@@ -106,20 +108,85 @@ export const HomePage: React.FC<{ navigateTo: (page: ExtendedPage, businessId?: 
                 setIsMapLoading(false);
             });
         }
-    }, [businesses]);
+    }, [allBusinesses]);
 
     const handleSelectCategory = (categoryName: string) => {
-        setSelectedCategory(prev => (prev === categoryName ? null : categoryName));
+        const newCategory = selectedCategory === categoryName ? null : categoryName;
+        setSelectedCategory(newCategory);
+        setSearchQuery(''); 
+
+        if (newCategory) {
+            setFilteredBusinesses(allBusinesses.filter(b => b.categories.includes(newCategory)));
+        } else {
+            setFilteredBusinesses(allBusinesses);
+        }
+        setMapCenter(costaRicaCenter);
+        setMapZoom(7.5);
     };
 
-    const filteredBusinesses = selectedCategory
-        ? businesses.filter(business => business.categories.includes(selectedCategory))
-        : businesses;
+    const handleSearch = async (e: React.FormEvent) => {
+        e.preventDefault();
+        setSelectedCategory(null);
+        if (!searchQuery.trim()) {
+            setFilteredBusinesses(allBusinesses);
+            setMapCenter(costaRicaCenter);
+            setMapZoom(7.5);
+            return;
+        }
+        setIsLoading(true);
+        setError(null);
+        try {
+            const response = await fetch(`${API_BASE_URL}/businesses/ai-search`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ query: searchQuery })
+            });
+            if (!response.ok) throw new Error('La búsqueda inteligente falló.');
+            
+            const searchResults = await response.json();
+            setFilteredBusinesses(searchResults);
+
+            if (searchResults.length > 0) {
+                const firstResult = searchResults[0];
+                const geocoder = new window.google.maps.Geocoder();
+                geocoder.geocode({ address: firstResult.address }, (results, status) => {
+                    if (status === 'OK' && results?.[0]) {
+                        const location = results[0].geometry.location;
+                        const newCenter = { lat: location.lat(), lng: location.lng() };
+                        
+                        setMapCenter(newCenter);
+                        setMapZoom(15); 
+                        
+                        setSelectedLocation({
+                            lat: newCenter.lat,
+                            lng: newCenter.lng,
+                            business: firstResult
+                        });
+                    }
+                });
+            } else {
+                setMapCenter(costaRicaCenter);
+                setMapZoom(7.5);
+            }
+
+        } catch (err: any) {
+            setError(err.message);
+        } finally {
+            setIsLoading(false);
+        }
+    };
+    
+    const filteredLocations = useMemo(() => {
+        const businessIds = new Set(filteredBusinesses.map(b => (b.id || (b as any)._id)));
+        return locations.filter(loc => {
+            const businessId = loc.business.id || (loc.business as any)._id;
+            return businessId && businessIds.has(businessId);
+        });
+    }, [filteredBusinesses, locations]);
 
     return (
         <motion.div variants={containerVariants} initial="hidden" animate="visible">
             <Box sx={{ maxWidth: '1280px', mx: 'auto', px: 2 }}>
-                {}
                 <motion.div variants={itemVariants}>
                     <Box sx={{ textAlign: 'center', my: { xs: 4, md: 8 } }}>
                         <Typography variant="h2" component="h1" gutterBottom sx={{ fontWeight: 'bold', color: 'text.primary' }}>
@@ -131,29 +198,41 @@ export const HomePage: React.FC<{ navigateTo: (page: ExtendedPage, businessId?: 
                     </Box>
                 </motion.div>
                 
-                {}
                 <motion.div variants={itemVariants}>
-                    <Paper elevation={3} sx={{ p: 1, display: 'flex', alignItems: 'center', maxWidth: '800px', mx: 'auto', borderRadius: '50px', mb: { xs: 6, md: 10 }, bgcolor: 'background.paper', flexDirection: { xs: 'column', sm: 'row' }, gap: 1 }}>
-                        <TextField fullWidth variant="standard" placeholder="Restaurante, hotel, barbería..." InputProps={{ disableUnderline: true, startAdornment: (<InputAdornment position="start" sx={{ pl: 2 }}><SearchIcon color="action" /></InputAdornment>), }} />
-                        <TextField fullWidth variant="standard" placeholder="¿Dónde?" InputProps={{ disableUnderline: true, startAdornment: (<InputAdornment position="start" sx={{ pl: 2 }}><LocationOnIcon color="action" /></InputAdornment>), }} sx={{ borderLeft: { sm: '1px solid #ddd' }, pl: { sm: 2 } }} />
-                        <Button variant="contained" size="large" sx={{ px: 4, py: 1.5 }}>Buscar</Button>
+                    <Paper 
+                        component="form" 
+                        onSubmit={handleSearch}
+                        elevation={3} 
+                        sx={{ p: 1, display: 'flex', alignItems: 'center', maxWidth: '800px', mx: 'auto', borderRadius: '50px', mb: { xs: 6, md: 10 }, bgcolor: 'background.paper', gap: 1 }}
+                    >
+                        <TextField 
+                            fullWidth 
+                            variant="standard" 
+                            placeholder="Busca lo que necesitas, por ejemplo: 'corte de pelo para hombre'" 
+                            value={searchQuery}
+                            onChange={(e) => setSearchQuery(e.target.value)}
+                            InputProps={{ 
+                                disableUnderline: true, 
+                                startAdornment: (<InputAdornment position="start" sx={{ pl: 2 }}><SearchIcon color="action" /></InputAdornment>), 
+                            }} 
+                        />
+                        <Button type="submit" variant="contained" size="large" sx={{ px: 4, py: 1.5 }}>Buscar</Button>
                     </Paper>
                 </motion.div>
                 
-                {}
                 <motion.div variants={itemVariants}>
                     <Box sx={{ my: 6 }}>
                         <Typography variant="h4" component="h2" sx={{ fontWeight: '600', mb: 3, color: 'text.primary' }}>
                             Explora en el Mapa
                         </Typography>
-                        {isLoading || isMapLoading ? <Box sx={{display: 'flex', justifyContent: 'center', my: 4}}><CircularProgress /></Box> : (
+                        {isMapLoading ? <Box sx={{display: 'flex', justifyContent: 'center', my: 4}}><CircularProgress /></Box> : (
                             <Paper elevation={3} sx={{ borderRadius: 4, overflow: 'hidden' }}>
                                 <GoogleMap
                                     mapContainerStyle={mapContainerStyle}
-                                    center={costaRicaCenter}
-                                    zoom={7.5}
+                                    center={mapCenter}
+                                    zoom={mapZoom}
                                 >
-                                    {locations.map((loc) => (
+                                    {filteredLocations.map((loc) => (
                                         <Marker 
                                             key={loc.business.id} 
                                             position={{ lat: loc.lat, lng: loc.lng }}
@@ -182,7 +261,12 @@ export const HomePage: React.FC<{ navigateTo: (page: ExtendedPage, businessId?: 
                                                     </Typography>
                                                 </CardContent>
                                                 <CardActions sx={{ p: 1, pt: 0 }}>
-                                                    <Button size="small" variant="contained" fullWidth onClick={() => navigateTo('businessDetails', selectedLocation.business.id)}>
+                                                    <Button size="small" variant="contained" fullWidth onClick={() => {
+                                                        const businessId = selectedLocation.business.id || (selectedLocation.business as any)._id;
+                                                        if (businessId) {
+                                                            navigateTo('businessDetails', businessId);
+                                                        }
+                                                    }}>
                                                         Ver Detalles
                                                     </Button>
                                                 </CardActions>
@@ -195,7 +279,6 @@ export const HomePage: React.FC<{ navigateTo: (page: ExtendedPage, businessId?: 
                     </Box>
                 </motion.div>
 
-                {}
                 <motion.div variants={itemVariants}>
                     <Box sx={{ mb: 8 }}>
                          <Typography variant="h4" component="h2" gutterBottom color="text.primary" sx={{ fontWeight: '600', mb: 3 }}>
@@ -203,7 +286,7 @@ export const HomePage: React.FC<{ navigateTo: (page: ExtendedPage, businessId?: 
                         </Typography>
                         <Box sx={{ display: 'flex', flexWrap: 'wrap', mx: -1.5 }}>
                             {categories.map((cat) => (
-                                <Box sx={{ p: 1.5, boxSizing: 'border-box', width: { xs: '50%', sm: '33.33%', md: '25%', lg: '20%' } }} key={cat.id || cat._id}>
+                                <Box sx={{ p: 1.5, boxSizing: 'border-box', width: { xs: '50%', sm: '33.33%', md: '25%', lg: '20%' } }} key={cat.id || (cat as any)._id}>
                                     <CategoryCard
                                         category={cat}
                                         isSelected={selectedCategory === cat.name}
@@ -215,7 +298,6 @@ export const HomePage: React.FC<{ navigateTo: (page: ExtendedPage, businessId?: 
                     </Box>
                 </motion.div>
                 
-                {}
                 <motion.div variants={itemVariants}>
                     <Box sx={{ mb: 8 }}>
                         <Typography variant="h4" component="h2" gutterBottom color="text.primary" sx={{ fontWeight: '600', mb: 3 }}>
@@ -225,9 +307,9 @@ export const HomePage: React.FC<{ navigateTo: (page: ExtendedPage, businessId?: 
                         {error && <Typography color="error" textAlign="center">{error}</Typography>}
                         {!isLoading && filteredBusinesses.length === 0 && (
                             <Box sx={{ textAlign: 'center', p: 4 }}>
-                                <Typography>No se encontraron negocios en esta categoría.</Typography>
+                                <Typography>No se encontraron negocios.</Typography>
                                 {selectedCategory && (
-                                    <Button variant="outlined" sx={{ mt: 2 }} onClick={() => setSelectedCategory(null)}>
+                                    <Button variant="outlined" sx={{ mt: 2 }} onClick={() => handleSelectCategory(null)}>
                                         Mostrar todos
                                     </Button>
                                 )}
@@ -236,10 +318,10 @@ export const HomePage: React.FC<{ navigateTo: (page: ExtendedPage, businessId?: 
                         <Box sx={{ display: 'flex', flexWrap: 'wrap', mx: -1.5 }}>
                             <AnimatePresence>
                                 {filteredBusinesses.map((business) => (
-                                    <Box sx={{ p: 1.5, boxSizing: 'border-box', width: { xs: '100%', sm: '50%', md: '33.33%', lg: '25%' } }} key={business.id}>
+                                    <Box sx={{ p: 1.5, boxSizing: 'border-box', width: { xs: '100%', sm: '50%', md: '33.33%', lg: '25%' } }} key={business.id || (business as any)._id}>
                                         <ListingCard
                                             business={business}
-                                            onViewDetails={() => navigateTo('businessDetails', business.id)}
+                                            onViewDetails={() => navigateTo('businessDetails', business.id || (business as any)._id)}
                                         />
                                     </Box>
                                 ))}

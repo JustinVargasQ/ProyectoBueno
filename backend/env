@@ -1,0 +1,14 @@
+DATABASE_URL="mongodb+srv://justinvargas4299:utn123@cluster0.6xsev0a.mongodb.net/?retryWrites=true&w=majority&appName=Cluster0"
+DATABASE_NAME="service-store"
+SECRET_KEY="esta_es_mi_clave_secreta_y_nadie_la_sabe_12345!"
+GOOGLE_CLIENT_ID="454154135916-f8nluugehor2507786qeipro9q3bev56.apps.googleusercontent.com"
+GOOGLE_API_KEY="AIzaSyBdX45K2nYNjc_wztFa6vf_NDWqbjJd3Xg"
+GOOGLE_APPLICATION_CREDENTIALS="google-credentials.json"
+
+# Configuración de Correo
+MAIL_SERVER=smtp.gmail.com
+MAIL_PORT=587
+MAIL_USERNAME=justinvargas4299@gmail.com
+MAIL_PASSWORD=tbmxmbhxrcaqwawr
+MAIL_DEFAULT_SENDER=justinvargas4299@gmail.com
+MAIL_FROM_NAME=ServiBook

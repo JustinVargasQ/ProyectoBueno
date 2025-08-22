@@ -54,66 +54,67 @@ async def handle_chat(
     if not business:
         raise HTTPException(status_code=404, detail="Negocio no encontrado.")
 
-    # --- INICIO DE LÓGICA MEJORADA PARA EMPLEADOS ---
-
     employees = []
     employee_context = ""
     selected_employee = None
     selected_employee_id = None
-
-    # 1. Verificar si el negocio opera por empleado y obtener la lista
     is_employee_mode = business.get("appointment_mode") == "por_empleado"
+
     if is_employee_mode:
         active_employees = await crud_employee.get_employees_by_business(db, request.business_id)
         if active_employees:
             employees = active_employees
             employee_names = [emp.get("name", "Desconocido") for emp in employees]
-            employee_context = f"\nEste negocio requiere seleccionar un empleado. Los empleados disponibles son: {', '.join(employee_names)}."
-            
-            # Buscar si el usuario mencionó a un empleado en el último mensaje o en el historial
+            employee_context = f"Este negocio funciona con citas por empleado. Los compas disponibles son: {', '.join(employee_names)}."
             full_conversation = request.message + " ".join([msg.parts[0] for msg in request.history])
             for emp in employees:
                 if emp.get("name", "").lower() in full_conversation.lower():
                     selected_employee = emp
                     selected_employee_id = str(emp["_id"])
                     break
+        else:
+            is_employee_mode = False
+            employee_context = "Este negocio no tiene empleados activos en este momento."
 
-    # 2. Obtener disponibilidad (general o específica del empleado)
     today_slots = await get_available_slots_for_chatbot(db, request.business_id, 0, selected_employee_id)
     tomorrow_slots = await get_available_slots_for_chatbot(db, request.business_id, 1, selected_employee_id)
     in_2_days_slots = await get_available_slots_for_chatbot(db, request.business_id, 2, selected_employee_id)
     
-    # 3. Construir el prompt dinámico
     availability_context = ""
     if is_employee_mode and not selected_employee:
-        availability_context = "El usuario primero debe elegir un empleado de la lista antes de que le muestres los horarios."
+        availability_context = "Para poder mostrarte los campos, primero tienes que decirme con cuál de los compas te gustaría la cita."
     else:
-        employee_name_for_prompt = f" para {selected_employee.get('name')}" if selected_employee else ""
+        employee_name_for_prompt = f" con {selected_employee.get('name')}" if selected_employee else ""
         availability_context = f"""
-        Aquí está la disponibilidad de citas{employee_name_for_prompt} para los próximos días:
-        - Hoy ({today_slots['date']}): {', '.join(today_slots['slots']) if today_slots['slots'] else 'No hay citas disponibles.'}
-        - Mañana ({tomorrow_slots['date']}): {', '.join(tomorrow_slots['slots']) if tomorrow_slots['slots'] else 'No hay citas disponibles.'}
-        - Pasado mañana ({in_2_days_slots['date']}): {', '.join(in_2_days_slots['slots']) if in_2_days_slots['slots'] else 'No hay citas disponibles.'}
+        Esta es la disponibilidad de citas{employee_name_for_prompt} para los próximos días:
+        - Hoy ({today_slots['date']}): {', '.join(today_slots['slots']) if today_slots['slots'] else 'ya no queda campo.'}
+        - Mañana ({tomorrow_slots['date']}): {', '.join(tomorrow_slots['slots']) if tomorrow_slots['slots'] else 'no hay campo.'}
+        - Pasado mañana ({in_2_days_slots['date']}): {', '.join(in_2_days_slots['slots']) if in_2_days_slots['slots'] else 'tampoco hay campo.'}
         """
 
+    # --- INICIO DE LA MODIFICACIÓN DE PERSONALIDAD Y LÓGICA ---
     context = f"""
-    Eres un asistente virtual amigable y eficiente para el negocio llamado "{business.get('name')}".
-    Tu objetivo es ayudar al usuario a reservar una cita. No hables de otros temas. Sé breve y directo.
-    {employee_context}
+    **Tu Personalidad:**
+    Eres un asistente virtual para "{business.get('name')}", con la personalidad de un "mae" de Costa Rica: amigable, servicial y "pura vida". Tu misión es que agendar una cita sea fácil y cómodo.
 
+    **Tu Única Misión:**
+    Tu propósito es agendar citas. Si te preguntan otra cosa, amablemente dices que en eso sí les quedas mal y vuelves al tema de la cita.
+
+    **Información Clave para Agendar:**
+    {employee_context}
     {availability_context}
 
-    Reglas de Conversación:
-    1. Saluda al usuario. Si se requiere un empleado, pregúntale con quién le gustaría agendar.
-    2. Si el negocio requiere un empleado y el usuario no ha elegido uno, insiste en que elija uno de la lista. No muestres horarios.
-    3. Una vez que se elige un empleado, muestra sus horarios disponibles y ayuda a agendar.
-    4. Cuando el usuario confirme la cita, pregunta por última vez para confirmar. Ejemplo: "Perfecto. ¿Confirmas tu cita con [EMPLEADO] para el [FECHA] a las [HORA]?"
-    5. IMPORTANTE: Si el usuario responde afirmativamente a tu pregunta de confirmación, tu ÚNICA RESPUESTA debe ser el siguiente comando especial y nada más:
-       [BOOK_APPOINTMENT:fecha="YYYY-MM-DD",hora="HH:MM",empleado="NOMBRE_DEL_EMPLEADO"]
-       - Si el negocio no usa empleados o no se eligió uno, omite el campo 'empleado'.
-    6. No inventes horarios ni empleados.
+    **Reglas de Conversación para Agendar (¡SIGUE ESTOS PASOS EN ORDEN ESTRICTO!):**
+    1.  **Saludo y Guía:** Saluda de forma amigable. Si el negocio requiere un empleado, pídelo. Si no, ve directo a la fecha y hora.
+    2.  **Confirmación de Cita:** Una vez que el usuario elige fecha y hora (y empleado si es necesario), haz una verificación final. Ejemplo: "¡Tuanis! Para confirmar: la cita el [FECHA] a las [HORA]. ¿Estamos bien así?".
+    3.  **Solicitud de Correo:** INMEDIATAMENTE DESPUÉS de que el usuario confirme la cita, haz esta pregunta: "¿Con mucho gusto! ¿A cuál correo electrónico le envío la confirmación?".
+    4.  **Verificación del Correo (NUEVO PASO CRÍTICO):** Cuando el usuario te dé su correo, debes mostrárselo y pedir una última confirmación. Tu respuesta DEBE ser: "Ok, lo envío a [correo del usuario]. ¿Es correcto?".
+    5.  **Comando de Agendamiento (¡MUY IMPORTANTE!):** SOLO DESPUÉS de que el usuario responda afirmativamente a la verificación del correo (paso 4), tu ÚNICA respuesta debe ser el comando especial, sin añadir ni una sola palabra más:
+        `[BOOK_APPOINTMENT:fecha="YYYY-MM-DD",hora="HH:MM",empleado="NOMBRE_DEL_EMPLEADO",email="correo@ejemplo.com"]`
+        (Si no se usa empleado, omites ese campo).
+    6.  **Honestidad:** Nunca inventes horarios.
     """
-    # --- FIN DE LÓGICA MEJORADA ---
+    # --- FIN DE LA MODIFICACIÓN DE PERSONALIDAD Y LÓGICA ---
 
     chat_history = [
         {"role": "user", "parts": [context]},
@@ -128,12 +129,13 @@ async def handle_chat(
         response = chat.send_message(request.message)
         model_response_text = response.text
 
-        booking_match = re.search(r'\[BOOK_APPOINTMENT:fecha="([^"]+)",hora="([^"]+)"(?:,empleado="([^"]+)")?\]', model_response_text)
+        booking_match = re.search(r'\[BOOK_APPOINTMENT:fecha="([^"]+)",hora="([^"]+)"(?:,empleado="([^"]+)")?,email="([^"]+)"\]', model_response_text)
 
         if booking_match:
             date_str = booking_match.group(1)
             time_str = booking_match.group(2)
             employee_name = booking_match.group(3)
+            target_email = booking_match.group(4)
 
             final_employee_id_for_booking = None
             if employee_name and employees:
@@ -146,41 +148,29 @@ async def handle_chat(
                 appointment_dt = datetime.strptime(f"{date_str} {time_str}", "%Y-%m-%d %H:%M")
 
                 new_appointment = await crud_appointment.create(
-                    db=db,
-                    business_id=request.business_id,
-                    user_id=str(current_user.id),
-                    appointment_time=appointment_dt,
-                    employee_id=final_employee_id_for_booking
+                    db=db, business_id=request.business_id, user_id=str(current_user.id),
+                    appointment_time=appointment_dt, employee_id=final_employee_id_for_booking
                 )
                 
                 appointment_id = str(new_appointment["_id"])
                 
                 details = {
-                    "id": appointment_id,
-                    "user_name": current_user.full_name or current_user.email,
-                    "business_name": business.get("name"),
-                    "date": appointment_dt.strftime("%d/%m/%Y"),
-                    "time": appointment_dt.strftime("%H:%M"),
-                    "address": business.get("address"),
-                    "status": "confirmed",
+                    "id": appointment_id, "user_name": current_user.full_name or current_user.email,
+                    "business_name": business.get("name"), "date": appointment_dt.strftime("%d/%m/%Y"),
+                    "time": appointment_dt.strftime("%H:%M"), "address": business.get("address"), "status": "confirmed",
                 }
                 qr_png = generate_qr_code_as_bytes(appointment_id).getvalue()
                 pdf_bytes = generate_appointment_pdf_as_bytes({**details, "qr_png": qr_png}, cancelled=False)
                 
                 await run_in_threadpool(
                     send_confirmation_email,
-                    user_email=current_user.email,
-                    details=details,
-                    pdf_bytes=pdf_bytes,
+                    user_email=target_email,
+                    details=details, pdf_bytes=pdf_bytes,
                 )
                 
-                confirmation_msg = f"¡Genial! Tu cita está confirmada para el {date_str} a las {time_str}"
-                if employee_name:
-                    confirmation_msg += f" con {employee_name}"
-                confirmation_msg += (
-                    f". Te hemos enviado un correo a {current_user.email} con los detalles. "
-                    "Puedes gestionar todas tus citas desde la sección 'Mis Citas'."
-                )
+                confirmation_msg = f"¡Listo, pura vida! Su cita quedó para el {date_str} a las {time_str}"
+                if employee_name: confirmation_msg += f" con {employee_name}"
+                confirmation_msg += f". Ya le mandé la confirmación al correo {target_email}. Ahí en 'Mis Citas' puede revisarla cuando quiera."
                 
                 return {
                     "response": confirmation_msg, 
@@ -190,7 +180,7 @@ async def handle_chat(
 
             except Exception as e:
                 print(f"Error al crear la cita o enviar correo: {e}")
-                error_response = "Lo siento, hubo un problema al confirmar tu cita en el sistema. Por favor, inténtalo de nuevo."
+                error_response = "¡Uy, mae! Algo falló en el sistema y no pude agendar la cita. ¿Lo intentamos otra vez?"
                 return {"response": error_response}
         
         return {"response": model_response_text}

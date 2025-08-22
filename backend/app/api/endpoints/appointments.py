@@ -1,8 +1,9 @@
 from fastapi import APIRouter, Depends, status, HTTPException, Response
 from fastapi.concurrency import run_in_threadpool
 from motor.motor_asyncio import AsyncIOMotorDatabase
-from typing import List
+from typing import List, Optional
 from datetime import datetime, timezone
+from pydantic import BaseModel, EmailStr
 
 from app.db.session import get_database
 from app.schemas.user import UserResponse
@@ -22,12 +23,18 @@ from app.services.notification_service import (
 
 router = APIRouter()
 
+# --- INICIO DE LA MODIFICACIÓN ---
+class EmailPayload(BaseModel):
+    email: Optional[EmailStr] = None
+# --- FIN DE LA MODIFICACIÓN ---
+
 @router.post("/", response_model=AppointmentResponse, status_code=status.HTTP_201_CREATED)
 async def create_appointment(
     appointment_in: AppointmentCreate,
     db: AsyncIOMotorDatabase = Depends(get_database),
     current_user: UserResponse = Depends(get_current_user),
 ):
+    # ... (sin cambios en esta función)
     appt = await crud_appointment.create(
         db=db,
         business_id=appointment_in.business_id,
@@ -41,12 +48,20 @@ async def create_appointment(
 @router.post("/{appointment_id}/send-pdf", status_code=status.HTTP_200_OK)
 async def send_appointment_pdf_email(
     appointment_id: str,
+    # --- INICIO DE LA MODIFICACIÓN ---
+    payload: EmailPayload, # Ahora aceptamos un cuerpo de solicitud
+    # --- FIN DE LA MODIFICACIÓN ---
     db: AsyncIOMotorDatabase = Depends(get_database),
     current_user: UserResponse = Depends(get_current_user),
 ):
     appointment = await crud_appointment.get_appointment_by_id(db, appointment_id, current_user.id)
     if not appointment:
         raise HTTPException(status_code=404, detail="Cita no encontrada o no te pertenece.")
+
+    # --- INICIO DE LA MODIFICACIÓN ---
+    # Usar el email del payload si se proporciona, si no, usar el del usuario logueado
+    target_email = payload.email if payload.email else current_user.email
+    # --- FIN DE LA MODIFICACIÓN ---
 
     business = await crud_business.get_business(db, str(appointment["business_id"]))
     details = {
@@ -67,15 +82,18 @@ async def send_appointment_pdf_email(
 
     success = await run_in_threadpool(
         send_confirmation_email,
-        user_email=current_user.email,
+        # --- INICIO DE LA MODIFICACIÓN ---
+        user_email=target_email, # Usamos el email seleccionado
+        # --- FIN DE LA MODIFICACIÓN ---
         details=details,
         pdf_bytes=pdf_bytes,
     )
     if not success:
         raise HTTPException(status_code=500, detail="No se pudo enviar el correo.")
-    return {"message": "Correo enviado con éxito."}
+    return {"message": f"Correo enviado con éxito a {target_email}."}
 
 
+# ... (El resto de las funciones como get_appointment_pdf, get_my_appointments, etc., no cambian) ...
 @router.get("/{appointment_id}/pdf")
 async def get_appointment_pdf(
     appointment_id: str,

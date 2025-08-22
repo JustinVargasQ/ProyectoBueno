@@ -1,8 +1,9 @@
-from typing import Optional
+from typing import Optional, List, Dict, Any
 from motor.motor_asyncio import AsyncIOMotorDatabase
 from bson import ObjectId
 from datetime import datetime, timedelta
 from app.schemas.business import BusinessCreate, BusinessUpdate, Schedule
+from app.crud import crud_appointment # Asegúrate de que esta importación exista
 
 async def get_business(db: AsyncIOMotorDatabase, business_id: str):
     if not ObjectId.is_valid(business_id):
@@ -48,12 +49,13 @@ async def update_business_schedule(db: AsyncIOMotorDatabase, business_id: str, s
     await db.businesses.update_one({"_id": ObjectId(business_id)}, {"$set": {"schedule": schedule_in.model_dump()}})
     return await get_business(db, business_id)
 
+# --- INICIO DE LA RECONSTRUCCIÓN DE LA FUNCIÓN ---
 async def get_available_slots_for_day(
     db: AsyncIOMotorDatabase,
     business_id: str,
     date: str,
     employee_id: Optional[str] = None,
-):
+) -> List[Dict[str, Any]]:
     business = await get_business(db, business_id)
     if not business or not business.get("schedule"):
         raise ValueError("El negocio no tiene un horario configurado.")
@@ -75,45 +77,63 @@ async def get_available_slots_for_day(
 
     from_time = datetime.combine(request_date, open_time)
     to_time = datetime.combine(request_date, close_time)
-    all_slots = []
+    all_slots_times = []
     cur = from_time
     while cur < to_time:
-        all_slots.append(cur.strftime("%H:%M"))
+        all_slots_times.append(cur.strftime("%H:%M"))
         cur += timedelta(minutes=slot_duration)
+    
+    # Obtener todas las citas del día con la info del usuario ya incluida
+    appointments = await crud_appointment.get_appointments_by_business_id_and_date(
+        db, business_id, request_date, employee_id=employee_id
+    )
 
-    capacity = capacity_business
-
-    from app.crud.crud_appointment import get_appointments_by_business_id_and_date
-    if employee_id:
-        if not ObjectId.is_valid(employee_id):
-            return []
-        employee = await db.employees.find_one({
-            "_id": ObjectId(employee_id),
-            "business_id": ObjectId(business_id),
-            "active": True,
-        })
-        if not employee:
-            return []
-
-        allowed = (employee.get("allowed_slots") or {}).get(day_of_week, [])
-        if not allowed:
-            return []
-
-        allowed_set = set(allowed)
-        all_slots = [s for s in all_slots if s in allowed_set]
-
-        capacity = 1  
-        appointments = await get_appointments_by_business_id_and_date(
-            db, business_id, request_date, employee_id=employee_id
-        )
-    else:
-        appointments = await get_appointments_by_business_id_and_date(
-            db, business_id, request_date
-        )
-
-    slot_counts = {}
+    # Agrupar las citas por hora
+    bookings_by_slot: Dict[str, List[Dict[str, Any]]] = {}
     for app in appointments:
-        t = app["appointment_time"].strftime("%H:%M")
-        slot_counts[t] = slot_counts.get(t, 0) + 1
+        time_str = app["appointment_time"].strftime("%H:%M")
+        if time_str not in bookings_by_slot:
+            bookings_by_slot[time_str] = []
+        
+        user_info = app.get("user_info")
+        bookings_by_slot[time_str].append({
+            "appointment_id": str(app["_id"]),
+            "user_id": str(app["user_id"]),
+            "user_name": user_info.get("full_name") if user_info else "Usuario no encontrado",
+            "user_email": user_info.get("email") if user_info else "N/A"
+        })
 
-    return [s for s in all_slots if slot_counts.get(s, 0) < capacity]
+    # Determinar la capacidad y los horarios permitidos (para modo empleado)
+    capacity = capacity_business
+    allowed_slots_set = set(all_slots_times)
+
+    if employee_id:
+        if not ObjectId.is_valid(employee_id): return []
+        employee = await db.employees.find_one({"_id": ObjectId(employee_id), "active": True})
+        if not employee: return []
+        
+        allowed = (employee.get("allowed_slots") or {}).get(day_of_week, [])
+        if not allowed: return []
+        
+        allowed_slots_set = set(allowed)
+        capacity = 1  # Capacidad es 1 por empleado
+
+    # Construir la respuesta detallada
+    detailed_slots = []
+    for time_slot in all_slots_times:
+        if time_slot not in allowed_slots_set:
+            continue
+
+        bookings = bookings_by_slot.get(time_slot, [])
+        booked_count = len(bookings)
+        
+        detailed_slots.append({
+            "time": time_slot,
+            "total_capacity": capacity,
+            "booked_count": booked_count,
+            "is_available": booked_count < capacity,
+            "bookings": bookings
+        })
+
+    return detailed_slots
+# --- FIN DE LA RECONSTRUCCIÓN DE LA FUNCIÓN ---

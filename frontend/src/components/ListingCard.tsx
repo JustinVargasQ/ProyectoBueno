@@ -1,5 +1,3 @@
-
-
 import { Card, CardActionArea, CardMedia, CardContent, Typography, Box, Rating } from '@mui/material';
 import { motion, Variants } from 'framer-motion';
 import { Business } from '../types';
@@ -17,11 +15,11 @@ const cardVariants: Variants = {
 };
 
 const ListingCard = ({ business, onViewDetails }: ListingCardProps) => {
-  const averageRating = 4.5;
-
-
-
+  // --- INICIO DE LA CORRECCIÓN ---
+  const averageRating = business.avg_rating || 0;
+  const reviewCount = business.reviews_count || 0;
   const imageUrl = business.logo_url || 'https://via.placeholder.com/300x180.png?text=Sin+Imagen';
+  // --- FIN DE LA CORRECCIÓN ---
 
   return (
     <motion.div
@@ -41,7 +39,6 @@ const ListingCard = ({ business, onViewDetails }: ListingCardProps) => {
             height="180"
             image={imageUrl}
             alt={`Imagen de ${business.name}`}
-
             sx={{ objectFit: 'cover' }}
           />
 
@@ -53,10 +50,12 @@ const ListingCard = ({ business, onViewDetails }: ListingCardProps) => {
               {business.description}
             </Typography>
             <Box sx={{ display: 'flex', alignItems: 'center', mt: 'auto' }}>
+              {/* --- INICIO DE LA CORRECCIÓN --- */}
               <Rating value={averageRating} precision={0.5} readOnly size="small" />
               <Typography variant="body2" color="text.secondary" sx={{ ml: 1 }}>
-                ({averageRating.toFixed(1)})
+                ({reviewCount})
               </Typography>
+              {/* --- FIN DE LA CORRECCIÓN --- */}
             </Box>
           </CardContent>
         </CardActionArea>

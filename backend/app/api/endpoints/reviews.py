@@ -17,7 +17,7 @@ from app.crud import crud_review, crud_appointment, crud_business
 router = APIRouter()
 
 
-# ------------------------- Helpers -------------------------
+# ------------------------- Helpers (sin cambios) -------------------------
 def _ensure_updated_at(docs: List[dict]) -> None:
     for r in docs:
         if "updated_at" not in r or r["updated_at"] is None:
@@ -51,7 +51,6 @@ def _normalize_review_doc(doc: Dict[str, Any]) -> Dict[str, Any]:
     for k in ["_id", "id", "user_id", "business_id", "appointment_id"]:
         if k in d:
             d[k] = _stringify_oid(d[k])
-    # normaliza reply anidado
     if isinstance(d.get("reply"), dict):
         rp = dict(d["reply"])
         for k in ["author_id", "_id", "id"]:
@@ -73,6 +72,7 @@ async def list_reviews(
     return [ReviewResponse.model_validate(r) for r in normalized]
 
 
+# --- INICIO DE LA MODIFICACIÓN DE LÓGICA ---
 @router.get("/eligibility/{business_id}")
 async def can_review(
     business_id: str,
@@ -80,13 +80,18 @@ async def can_review(
     current_user: UserResponse = Depends(get_current_user),
 ):
     """
-    Elegible si el usuario tiene **alguna** cita pasada (no cancelada) con el negocio.
-    Devuelve la última cita pasada para vincular la reseña.
+    Verifica si un usuario puede dejar una reseña.
+    - Admins y Dueños: Siempre pueden.
+    - Usuarios: Necesitan una cita pasada y no cancelada.
     """
+    # Si es admin o dueño, siempre es elegible y no necesita una cita específica.
+    if current_user.role in ["admin", "dueño"]:
+        return {"eligible": True, "appointment_id": None}
+
+    # Lógica para usuarios normales
     now = datetime.utcnow()
     user_apps = await crud_appointment.get_appointments_by_user_id(db, current_user.id)
 
-    # Acepta business_id tanto str como ObjectId
     try:
         bid_oid = ObjectId(business_id)
     except Exception:
@@ -121,57 +126,34 @@ async def create_review(
     current_user: UserResponse = Depends(get_current_user),
 ):
     """
-    Crea una reseña. Ahora se permiten múltiples reseñas por negocio:
-    se asocian a la **última cita pasada** del usuario con ese negocio.
+    Crea una reseña.
+    - Admins y Dueños: Pueden comentar sin una cita.
+    - Usuarios: Requieren una cita válida.
     """
     appointment_id = payload.appointment_id
 
-    # Si no llega appointment_id, localizamos la última cita pasada elegible
-    if not appointment_id:
-        now = datetime.utcnow()
-        user_apps = await crud_appointment.get_appointments_by_user_id(db, current_user.id)
-        try:
-            bid_oid = ObjectId(payload.business_id)
-        except Exception:
-            bid_oid = None
-        bid_str = payload.business_id
+    # Si el usuario es admin o dueño, no se requiere validar la cita.
+    if current_user.role not in ["admin", "dueño"]:
+        if not appointment_id:
+            raise HTTPException(status_code=400, detail="Los usuarios deben tener una cita para poder comentar.")
 
-        candidates: List[Dict[str, Any]] = []
-        for a in (user_apps or []):
-            a_bid = a.get("business_id")
-            same_business = str(a_bid) == bid_str or (bid_oid is not None and a_bid == bid_oid)
-            status = (a.get("status") or "").lower()
-            not_cancelled = status not in ("cancelled", "canceled")
-            when = _as_dt(a.get("appointment_time")) or now
-            if same_business and not_cancelled and when <= now:
-                candidates.append(a)
-        if not candidates:
-            raise HTTPException(status_code=400, detail="No pudimos validar una cita elegible para este negocio.")
-        candidates.sort(key=lambda x: _as_dt(x.get("appointment_time")) or datetime.min, reverse=True)
-        appointment_id = _normalize_id(candidates[0].get("_id"))
+        appo = await crud_appointment.get_appointment_by_id(db, appointment_id, current_user.id)
+        if not appo or str(appo.get("business_id")) != payload.business_id:
+            raise HTTPException(status_code=400, detail="Cita inválida para este negocio.")
 
-    # Validaciones básicas
-    appo = await crud_appointment.get_appointment_by_id(db, appointment_id, current_user.id)
-    if not appo or str(appo.get("business_id")) != payload.business_id:
-        raise HTTPException(status_code=400, detail="Cita inválida para este negocio.")
+        when = _as_dt(appo.get("appointment_time"))
+        if when is None or when > datetime.utcnow():
+            raise HTTPException(status_code=400, detail="Solo puedes reseñar luego de tu cita.")
 
-    when = _as_dt(appo.get("appointment_time"))
-    if when is None or when > datetime.utcnow():
-        raise HTTPException(status_code=400, detail="Solo puedes reseñar luego de tu cita.")
-
-    # >>> Eliminado el bloqueo "una reseña por cita" <<<
-
-    # Crear reseña
     doc = await crud_review.create_review(
         db,
         business_id=payload.business_id,
-        appointment_id=appointment_id,
+        appointment_id=appointment_id, # Puede ser None para admins/dueños
         user_id=current_user.id,
         rating=payload.rating,
         comment=payload.comment or "",
     )
 
-    # Garantiza timestamps por si tu CRUD no los puso (el nuestro ya los agrega)
     now = datetime.utcnow()
     if doc.get("created_at") is None:
         await db["reviews"].update_one({"_id": doc["_id"]}, {"$set": {"created_at": now}})
@@ -180,12 +162,12 @@ async def create_review(
         await db["reviews"].update_one({"_id": doc["_id"]}, {"$set": {"updated_at": doc.get("created_at", now)}})
         doc["updated_at"] = doc.get("created_at", now)
 
-    # Recalcular rating del negocio
     await crud_review.recompute_business_rating(db, payload.business_id)
 
     normalized = _normalize_review_doc(doc)
     _ensure_updated_at([normalized])
     return ReviewResponse.model_validate(normalized)
+# --- FIN DE LA MODIFICACIÓN DE LÓGICA ---
 
 
 @router.patch("/{review_id}", response_model=ReviewResponse)
@@ -240,7 +222,7 @@ async def delete_review(
 @router.post("/{review_id}/reply", response_model=ReviewResponse)
 async def reply_review(
     review_id: str,
-    payload: dict = Body(...),  # espera {"content": "texto..."}
+    payload: dict = Body(...),
     db: AsyncIOMotorDatabase = Depends(get_database),
     current_user: UserResponse = Depends(get_current_user),
 ):
@@ -253,18 +235,22 @@ async def reply_review(
         raise HTTPException(status_code=404, detail="Reseña no encontrada.")
 
     business = await crud_business.get_business(db, str(review.get("business_id")))
-    role = "user"
-    if business and str(business.get("owner_id")) == current_user.id:
-        role = "owner"
-    if getattr(current_user, "is_superuser", False) or getattr(current_user, "is_admin", False):
-        role = "admin"
-    if role not in ("owner", "admin"):
+    
+    # --- INICIO DE LA MODIFICACIÓN DE LÓGICA ---
+    # Permitir que el dueño del negocio específico o cualquier admin puedan responder.
+    is_business_owner = business and str(business.get("owner_id")) == current_user.id
+    is_admin = current_user.role == "admin"
+    
+    if not is_business_owner and not is_admin:
         raise HTTPException(status_code=403, detail="No autorizado para responder.")
+
+    role = "admin" if is_admin else "owner"
+    # --- FIN DE LA MODIFICACIÓN DE LÓGICA ---
 
     doc = await crud_review.add_reply(
         db,
         review_id=review_id,
-        author_role=("admin" if role == "admin" else "owner"),
+        author_role=role,
         author_id=current_user.id,
         content=content,
     )

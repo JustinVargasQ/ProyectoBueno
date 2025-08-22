@@ -11,11 +11,10 @@ from app.crud import crud_business
 from app.schemas.business import BusinessCreate, BusinessUpdate, BusinessResponse, Schedule
 from app.schemas.user import UserResponse
 from app.core.security import get_current_user
-from app.core.config import settings # Importar settings
+from app.core.config import settings
 
 router = APIRouter()
 
-# --- Modelos Pydantic para los nuevos endpoints ---
 class GenerateDescriptionRequest(BaseModel):
     name: str
     categories: List[str]
@@ -24,7 +23,6 @@ class GenerateDescriptionRequest(BaseModel):
 class SearchRequest(BaseModel):
     query: str
 
-# --- Funciones de ayuda ---
 def convert_business_to_response(business: Dict[str, Any]) -> Dict[str, Any]:
     return {
         "id": str(business["_id"]),
@@ -38,9 +36,10 @@ def convert_business_to_response(business: Dict[str, Any]) -> Dict[str, Any]:
         "status": business.get("status"),
         "schedule": business.get("schedule"),
         "appointment_mode": business.get("appointment_mode", "generico"),
+        "avg_rating": business.get("avg_rating", 0),
+        "reviews_count": business.get("reviews_count", 0),
     }
 
-# --- Endpoints existentes ---
 @router.get("/", response_model=List[BusinessResponse])
 async def get_all_published_businesses(db: AsyncIOMotorDatabase = Depends(get_database)):
     businesses_from_db = await crud_business.get_published_businesses(db)
@@ -51,9 +50,6 @@ async def ai_search(
     request: SearchRequest,
     db: AsyncIOMotorDatabase = Depends(get_database)
 ):
-    """
-    Realiza una búsqueda semántica de negocios utilizando IA.
-    """
     try:
         api_key = settings.GOOGLE_API_KEY
         if not api_key:
@@ -62,7 +58,6 @@ async def ai_search(
         genai.configure(api_key=api_key)
         model = genai.GenerativeModel('gemini-1.5-flash-latest')
 
-        # Obtener todos los negocios para darle contexto a la IA
         all_businesses = await crud_business.get_published_businesses(db)
         
         business_context = json.dumps([
@@ -85,14 +80,11 @@ async def ai_search(
 
         response = await model.generate_content_async(prompt)
         
-        # Procesar la respuesta para obtener los IDs ordenados
         ordered_ids_str = response.text.strip()
         ordered_ids = [ObjectId(id_str.strip()) for id_str in ordered_ids_str.split(',') if ObjectId.is_valid(id_str.strip())]
         
-        # Mapear los IDs a los negocios completos
         business_map = {b["_id"]: b for b in all_businesses}
         
-        # Reordenar la lista de negocios según la respuesta de la IA
         ordered_businesses = [business_map[oid] for oid in ordered_ids if oid in business_map]
 
         return [convert_business_to_response(b) for b in ordered_businesses]
@@ -100,7 +92,6 @@ async def ai_search(
     except Exception as e:
         print(f"Error con la búsqueda de IA: {e}")
         raise HTTPException(status_code=500, detail="Error al realizar la búsqueda con IA.")
-
 
 @router.get("/my-businesses", response_model=List[BusinessResponse])
 async def get_my_businesses(
@@ -173,7 +164,7 @@ async def manage_my_business_schedule(
     updated_business = await crud_business.update_business_schedule(db, business_id, schedule_in)
     return convert_business_to_response(updated_business)
 
-@router.get("/{business_id}/available-slots", response_model=List[str])
+@router.get("/{business_id}/available-slots", response_model=List[Dict[str, Any]])
 async def get_available_slots(
     business_id: str,
     date: str,
@@ -191,9 +182,6 @@ async def generate_business_description(
     request: GenerateDescriptionRequest,
     current_user: UserResponse = Depends(get_current_user)
 ):
-    """
-    Genera una descripción de negocio usando Gemini.
-    """
     try:
         api_key = settings.GOOGLE_API_KEY
         if not api_key:

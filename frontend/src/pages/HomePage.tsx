@@ -1,11 +1,14 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useRef, useCallback } from 'react';
 import {
     Typography, Box, TextField, Button, Paper, InputAdornment, CircularProgress,
-    Card, CardMedia, CardContent, CardActions
+    Card, CardMedia, CardContent, CardActions, IconButton, Tooltip, Stack, Avatar
 } from '@mui/material';
 import { GoogleMap, Marker, InfoWindow } from '@react-google-maps/api';
 
 import { Search as SearchIcon } from '@mui/icons-material';
+import MicIcon from '@mui/icons-material/Mic';
+import CloseIcon from '@mui/icons-material/Close';
+import SmartToyIcon from '@mui/icons-material/SmartToy';
 import { motion, AnimatePresence, Variants } from 'framer-motion';
 
 import CategoryCard from '../components/CategoryCard';
@@ -13,6 +16,7 @@ import ListingCard from '../components/ListingCard';
 import { Business, Category } from '../types';
 import { API_BASE_URL } from '../services/api';
 import { ExtendedPage } from '../App';
+import { useAuth } from '@/hooks/useAuth';
 
 
 interface BusinessLocation {
@@ -20,7 +24,6 @@ interface BusinessLocation {
     lng: number;
     business: Business;
 }
-
 
 const mapContainerStyle = {
   width: '100%',
@@ -33,12 +36,154 @@ const costaRicaCenter = {
   lng: -84.087502
 };
 
-
 const containerVariants: Variants = { hidden: { opacity: 0 }, visible: { opacity: 1, transition: { staggerChildren: 0.1 } } };
 const itemVariants: Variants = { hidden: { y: 20, opacity: 0 }, visible: { y: 0, opacity: 1 } };
 
+interface AssistantMessage {
+  role: 'user' | 'model';
+  content: string;
+}
+
+const SearchAssistant: React.FC<{
+  onClose: () => void;
+  onResults: (businessIds: string[]) => void;
+  onNavigate: (businessId: string) => void;
+}> = ({ onClose, onResults, onNavigate }) => {
+    const { token, user } = useAuth();
+    const [history, setHistory] = useState<AssistantMessage[]>([{ role: 'model', content: '¡Pura vida! Soy tu asistente de búsqueda. ¿Qué andas buscando hoy?' }]);
+    const [isLoading, setIsLoading] = useState(false);
+    const [isRecording, setIsRecording] = useState(false);
+    const mediaRecorderRef = useRef<MediaRecorder | null>(null);
+    const audioChunksRef = useRef<Blob[]>([]);
+    const messagesEndRef = useRef<HTMLDivElement>(null);
+
+    useEffect(() => {
+        messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+    }, [history]);
+    
+    const speak = async (text: string) => {
+        if (!token) return;
+        try {
+            const response = await fetch(`${API_BASE_URL}/voice/text-to-speech`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+                body: JSON.stringify({ text })
+            });
+            if (!response.ok) throw new Error("No se pudo generar el audio.");
+            
+            const audioBlob = await response.blob();
+            const audioUrl = URL.createObjectURL(audioBlob);
+            const audio = new Audio(audioUrl);
+            audio.play();
+        } catch (error) { console.error("Error al sintetizar voz:", error); }
+    };
+
+    const sendMessage = async (messageText: string) => {
+        if (!messageText.trim()) return;
+
+        const newHistory: AssistantMessage[] = [...history, { role: 'user', content: messageText }];
+        setHistory(newHistory);
+        setIsLoading(true);
+
+        try {
+            const response = await fetch(`${API_BASE_URL}/search/assistant`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+                body: JSON.stringify({ history: newHistory }),
+            });
+
+            if (!response.ok) throw new Error("El asistente no está disponible.");
+            
+            const data = await response.json();
+            let rawResponse = data.response;
+
+            const navMatch = rawResponse.match(/\[NAVIGATE_TO: "(.*?)"\]/);
+            if (navMatch && navMatch[1]) {
+                onNavigate(navMatch[1]);
+                return;
+            }
+
+            const idMatch = rawResponse.match(/\[IDs: (.*?)\]/);
+            const ids: string[] = idMatch ? JSON.parse(`[${idMatch[1]}]`) : [];
+            const cleanResponse = rawResponse.replace(/\[(IDs|NAVIGATE_TO): .*?\]/, '').trim();
+
+            setHistory(prev => [...prev, { role: 'model', content: cleanResponse }]);
+            await speak(cleanResponse);
+            onResults(ids);
+
+        } catch (error: any) {
+            const errorMessage = { role: 'model', content: 'Diay, algo falló. ¿Intentamos de nuevo?' } as AssistantMessage;
+            setHistory(prev => [...prev, errorMessage]);
+            await speak(errorMessage.content);
+        } finally { setIsLoading(false); }
+    };
+    
+    const toggleRecording = async () => {
+        if (isRecording) {
+            mediaRecorderRef.current?.stop();
+        } else {
+            try {
+                const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+                mediaRecorderRef.current = new MediaRecorder(stream, { mimeType: 'audio/webm; codecs=opus' });
+                audioChunksRef.current = [];
+                mediaRecorderRef.current.ondataavailable = e => audioChunksRef.current.push(e.data);
+                mediaRecorderRef.current.onstop = async () => {
+                    setIsRecording(false);
+                    const audioBlob = new Blob(audioChunksRef.current, { type: 'audio/webm; codecs=opus' });
+                    const formData = new FormData();
+                    formData.append('audio_file', audioBlob);
+                    try {
+                        const res = await fetch(`${API_BASE_URL}/voice/speech-to-text`, {
+                            method: 'POST',
+                            headers: { Authorization: `Bearer ${token}` },
+                            body: formData,
+                        });
+                        const data = await res.json();
+                        if (data.transcript) await sendMessage(data.transcript);
+                    } catch (err) { console.error("Error al transcribir", err); }
+                };
+                mediaRecorderRef.current.start();
+                setIsRecording(true);
+            } catch (err) { console.error("Error al acceder al micrófono", err); }
+        }
+    };
+
+    return (
+        <Paper elevation={8} sx={{ position: 'fixed', bottom: 24, right: 24, width: {xs: '90%', sm: 380}, height: {xs: '70%', sm: 550}, zIndex: 1300, borderRadius: 4, display: 'flex', flexDirection: 'column' }}>
+            <Box sx={{ p: 2, bgcolor: 'primary.main', color: 'white', display: 'flex', alignItems: 'center', gap: 1.5, flexShrink: 0 }}>
+                <SmartToyIcon />
+                <Typography fontWeight="bold">Asistente de Búsqueda</Typography>
+                <IconButton onClick={onClose} sx={{ ml: 'auto', color: 'white' }}><CloseIcon /></IconButton>
+            </Box>
+            <Box sx={{ flexGrow: 1, overflowY: 'auto', p: 2, bgcolor: 'background.default' }}>
+                <Stack spacing={2}>
+                    {history.map((msg, index) => (
+                        <Box key={index} sx={{ display: 'flex', gap: 1.5, flexDirection: msg.role === 'user' ? 'row-reverse' : 'row' }}>
+                             <Avatar sx={{ width: 32, height: 32, mt: 0.5 }}>
+                                {msg.role === 'user' ? (user?.full_name || 'U')[0].toUpperCase() : <SmartToyIcon fontSize="small" />}
+                            </Avatar>
+                            <Paper sx={{ p: 1.5, borderRadius: '16px', bgcolor: msg.role === 'user' ? 'primary.main' : 'background.paper', color: msg.role === 'user' ? 'white' : 'text.primary' }}>
+                                <Typography variant="body2">{msg.content}</Typography>
+                            </Paper>
+                        </Box>
+                    ))}
+                    {isLoading && <CircularProgress size={24} sx={{ mx: 'auto' }} />}
+                    <div ref={messagesEndRef} />
+                </Stack>
+            </Box>
+            <Box sx={{ p: 2, borderTop: 1, borderColor: 'divider' }}>
+                <Tooltip title={isRecording ? "Detener grabación" : "Hablar con el asistente"}>
+                    <IconButton onClick={toggleRecording} color={isRecording ? "error" : "primary"} size="large" sx={{ display: 'block', mx: 'auto' }}>
+                        <MicIcon fontSize="large" />
+                    </IconButton>
+                </Tooltip>
+            </Box>
+        </Paper>
+    );
+};
 
 export const HomePage: React.FC<{ navigateTo: (page: ExtendedPage, businessId?: string) => void; }> = ({ navigateTo }) => {
+    const { token } = useAuth();
     const [allBusinesses, setAllBusinesses] = useState<Business[]>([]);
     const [filteredBusinesses, setFilteredBusinesses] = useState<Business[]>([]);
     const [categories, setCategories] = useState<Category[]>([]);
@@ -53,6 +198,8 @@ export const HomePage: React.FC<{ navigateTo: (page: ExtendedPage, businessId?: 
 
     const [mapCenter, setMapCenter] = useState(costaRicaCenter);
     const [mapZoom, setMapZoom] = useState(7.5);
+    
+    const [assistantOpen, setAssistantOpen] = useState(false);
 
     useEffect(() => {
         const fetchInitialData = async () => {
@@ -80,7 +227,6 @@ export const HomePage: React.FC<{ navigateTo: (page: ExtendedPage, businessId?: 
         };
         fetchInitialData();
     }, []);
-
 
     useEffect(() => {
         if (allBusinesses.length > 0 && window.google) {
@@ -124,10 +270,9 @@ export const HomePage: React.FC<{ navigateTo: (page: ExtendedPage, businessId?: 
         setMapZoom(7.5);
     };
 
-    const handleSearch = async (e: React.FormEvent) => {
-        e.preventDefault();
+    const handleSearch = async (query: string) => {
         setSelectedCategory(null);
-        if (!searchQuery.trim()) {
+        if (!query.trim()) {
             setFilteredBusinesses(allBusinesses);
             setMapCenter(costaRicaCenter);
             setMapZoom(7.5);
@@ -139,7 +284,7 @@ export const HomePage: React.FC<{ navigateTo: (page: ExtendedPage, businessId?: 
             const response = await fetch(`${API_BASE_URL}/businesses/ai-search`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ query: searchQuery })
+                body: JSON.stringify({ query: query })
             });
             if (!response.ok) throw new Error('La búsqueda inteligente falló.');
             
@@ -176,6 +321,32 @@ export const HomePage: React.FC<{ navigateTo: (page: ExtendedPage, businessId?: 
         }
     };
     
+    const handleFormSubmit = (e: React.FormEvent) => {
+        e.preventDefault();
+        handleSearch(searchQuery);
+    };
+
+    const handleAssistantResults = (businessIds: string[]) => {
+        if (businessIds.length > 0) {
+            const results = allBusinesses.filter(b => businessIds.includes((b.id || (b as any)._id) as string));
+            setFilteredBusinesses(results);
+            
+            const firstResultLocation = locations.find(loc => loc.business.id === businessIds[0] || (loc.business as any)._id === businessIds[0]);
+            if (firstResultLocation) {
+                setMapCenter({ lat: firstResultLocation.lat, lng: firstResultLocation.lng });
+                setMapZoom(15);
+                setSelectedLocation(firstResultLocation);
+            }
+        } else {
+            setFilteredBusinesses(allBusinesses);
+        }
+    };
+    
+    const handleAssistantNavigate = (businessId: string) => {
+        setAssistantOpen(false);
+        navigateTo('businessDetails', businessId);
+    };
+    
     const filteredLocations = useMemo(() => {
         const businessIds = new Set(filteredBusinesses.map(b => (b.id || (b as any)._id)));
         return locations.filter(loc => {
@@ -186,6 +357,14 @@ export const HomePage: React.FC<{ navigateTo: (page: ExtendedPage, businessId?: 
 
     return (
         <motion.div variants={containerVariants} initial="hidden" animate="visible">
+            {assistantOpen && (
+                <SearchAssistant 
+                    onClose={() => setAssistantOpen(false)}
+                    onResults={handleAssistantResults}
+                    onNavigate={handleAssistantNavigate}
+                />
+            )}
+
             <Box sx={{ maxWidth: '1280px', mx: 'auto', px: 2 }}>
                 <motion.div variants={itemVariants}>
                     <Box sx={{ textAlign: 'center', my: { xs: 4, md: 8 } }}>
@@ -201,19 +380,28 @@ export const HomePage: React.FC<{ navigateTo: (page: ExtendedPage, businessId?: 
                 <motion.div variants={itemVariants}>
                     <Paper 
                         component="form" 
-                        onSubmit={handleSearch}
+                        onSubmit={handleFormSubmit}
                         elevation={3} 
                         sx={{ p: 1, display: 'flex', alignItems: 'center', maxWidth: '800px', mx: 'auto', borderRadius: '50px', mb: { xs: 6, md: 10 }, bgcolor: 'background.paper', gap: 1 }}
                     >
                         <TextField 
                             fullWidth 
                             variant="standard" 
-                            placeholder="Busca lo que necesitas, por ejemplo: 'corte de pelo para hombre'" 
+                            placeholder="Busca por texto (ej: 'lavar la nave')"
                             value={searchQuery}
                             onChange={(e) => setSearchQuery(e.target.value)}
                             InputProps={{ 
                                 disableUnderline: true, 
-                                startAdornment: (<InputAdornment position="start" sx={{ pl: 2 }}><SearchIcon color="action" /></InputAdornment>), 
+                                startAdornment: (
+                                    <InputAdornment position="start" sx={{ pl: 2, display: 'flex', alignItems: 'center' }}>
+                                        <SearchIcon color="action" />
+                                        <Tooltip title="Hablar con el Asistente de Búsqueda">
+                                            <IconButton onClick={() => setAssistantOpen(true)} color="primary" sx={{ ml: 1 }}>
+                                                <MicIcon />
+                                            </IconButton>
+                                        </Tooltip>
+                                    </InputAdornment>
+                                ), 
                             }} 
                         />
                         <Button type="submit" variant="contained" size="large" sx={{ px: 4, py: 1.5 }}>Buscar</Button>
@@ -234,7 +422,7 @@ export const HomePage: React.FC<{ navigateTo: (page: ExtendedPage, businessId?: 
                                 >
                                     {filteredLocations.map((loc) => (
                                         <Marker 
-                                            key={loc.business.id} 
+                                            key={loc.business.id || (loc.business as any)._id} 
                                             position={{ lat: loc.lat, lng: loc.lng }}
                                             onClick={() => setSelectedLocation(loc)}
                                         />
@@ -301,18 +489,16 @@ export const HomePage: React.FC<{ navigateTo: (page: ExtendedPage, businessId?: 
                 <motion.div variants={itemVariants}>
                     <Box sx={{ mb: 8 }}>
                         <Typography variant="h4" component="h2" gutterBottom color="text.primary" sx={{ fontWeight: '600', mb: 3 }}>
-                            {selectedCategory ? `Resultados para "${selectedCategory}"` : 'Negocios Destacados'}
+                            {selectedCategory ? `Resultados para "${selectedCategory}"` : (filteredBusinesses.length < allBusinesses.length ? 'Resultados del Asistente' : 'Negocios Destacados')}
                         </Typography>
                         {isLoading && <Box sx={{ display: 'flex', justifyContent: 'center', my: 4 }}><CircularProgress /></Box>}
                         {error && <Typography color="error" textAlign="center">{error}</Typography>}
                         {!isLoading && filteredBusinesses.length === 0 && (
                             <Box sx={{ textAlign: 'center', p: 4 }}>
                                 <Typography>No se encontraron negocios.</Typography>
-                                {selectedCategory && (
-                                    <Button variant="outlined" sx={{ mt: 2 }} onClick={() => handleSelectCategory(null)}>
-                                        Mostrar todos
-                                    </Button>
-                                )}
+                                <Button variant="outlined" sx={{ mt: 2 }} onClick={() => setFilteredBusinesses(allBusinesses)}>
+                                    Mostrar todos
+                                </Button>
                             </Box>
                         )}
                         <Box sx={{ display: 'flex', flexWrap: 'wrap', mx: -1.5 }}>

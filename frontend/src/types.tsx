@@ -1,4 +1,3 @@
-
 export type ScheduleDay = {
   is_active: boolean;
   open_time: string;
@@ -24,10 +23,11 @@ export interface Business {
   status: 'draft' | 'published' | 'archived';
   schedule?: any;
   appointment_mode?: 'generico' | 'por_empleado';
-
   owner_id?: string;        
-  rating_avg?: number;      
-  rating_count?: number;    
+  // --- INICIO DE LA CORRECCIÓN ---
+  avg_rating?: number;      
+  reviews_count?: number;    
+  // --- FIN DE LA CORRECCIÓN ---
 }
 
 export interface Appointment {
@@ -72,7 +72,6 @@ export interface Review {
   created_at: string;      
   replies?: ReviewReply[];
 }
-
 
 export interface OwnerRequest {
   business_name: string;

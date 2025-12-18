@@ -5,6 +5,7 @@ from bson import ObjectId
 from pydantic import BaseModel
 import google.generativeai as genai
 import json
+from datetime import datetime # <--- Importante para validar fechas
 
 from app.db.session import get_database
 from app.crud import crud_business
@@ -56,7 +57,7 @@ async def ai_search(
             raise HTTPException(status_code=500, detail="La clave de API de Google no está configurada.")
         
         genai.configure(api_key=api_key)
-        model = genai.GenerativeModel('gemini-1.5-flash-latest')
+        model = genai.GenerativeModel('gemini-2.5-flash')
 
         all_businesses = await crud_business.get_published_businesses(db)
         
@@ -164,7 +165,8 @@ async def manage_my_business_schedule(
     updated_business = await crud_business.update_business_schedule(db, business_id, schedule_in)
     return convert_business_to_response(updated_business)
 
-@router.get("/{business_id}/available-slots", response_model=List[Dict[str, Any]])
+# --- FUNCIÓN CORREGIDA: Filtra fechas pasadas y horas ya ocurridas ---
+@router.get("/{business_id}/available-slots", response_model=List[str])
 async def get_available_slots(
     business_id: str,
     date: str,
@@ -172,10 +174,39 @@ async def get_available_slots(
     db: AsyncIOMotorDatabase = Depends(get_database)
 ):
     try:
+        # 1. Validar que la fecha no sea anterior a hoy
+        requested_date = datetime.strptime(date, "%Y-%m-%d").date()
+        today = datetime.now().date()
+        now = datetime.now()
+
+        if requested_date < today:
+            # Si piden cita para ayer o antes, devolvemos lista vacía
+            return []
+
+        # Obtener slots de la base de datos
         slots = await crud_business.get_available_slots_for_day(db, business_id, date, employee_id)
-        return slots
+        
+        cleaned_slots = []
+        for s in slots:
+            time_str = s.get('time', str(s)) if isinstance(s, dict) else str(s)
+            
+            # 2. Si la fecha es HOY, filtramos las horas que ya pasaron
+            if requested_date == today:
+                try:
+                    slot_dt = datetime.strptime(f"{date} {time_str}", "%Y-%m-%d %H:%M")
+                    # Si la hora de la cita es menor a la hora actual + un pequeño margen (ej: no permitir reservar algo que empieza en 1 min), saltamos
+                    if slot_dt < now:
+                        continue 
+                except ValueError:
+                    pass # Si hay error de formato, lo ignoramos por seguridad
+            
+            cleaned_slots.append(time_str)
+                
+        return cleaned_slots
+
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
+# ---------------------------------------------------------------------
 
 @router.post("/generate-description", response_model=Dict[str, str])
 async def generate_business_description(
@@ -188,7 +219,7 @@ async def generate_business_description(
             raise HTTPException(status_code=500, detail="La clave de API de Google no está configurada.")
         
         genai.configure(api_key=api_key)
-        model = genai.GenerativeModel('gemini-1.5-flash-latest')
+        model = genai.GenerativeModel('gemini-2.5-flash')
 
         prompt_parts = [
             f"Eres un experto en marketing. Genera una descripción atractiva y profesional para un negocio en español.",

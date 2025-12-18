@@ -30,7 +30,7 @@ async def handle_search_assistant(
         raise HTTPException(status_code=500, detail="La API de Google no está configurada.")
 
     genai.configure(api_key=settings.GOOGLE_API_KEY)
-    model = genai.GenerativeModel('gemini-1.5-flash-latest')
+    model = genai.GenerativeModel('gemini-2.5-flash')
 
     all_businesses = await crud_business.get_published_businesses(db)
     

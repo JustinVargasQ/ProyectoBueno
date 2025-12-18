@@ -26,7 +26,7 @@ async def suggest_category_icons(
         raise HTTPException(status_code=500, detail="La clave de API de Google no está configurada.")
 
     genai.configure(api_key=settings.GOOGLE_API_KEY)
-    model = genai.GenerativeModel('gemini-1.5-flash-latest')
+    model = genai.GenerativeModel('gemini-2.5-flash')
 
     icon_list = "ContentCut, Brush, FaceRetouchingNatural, Spa, Storefront, Star, People, LocationOn, Search"
 

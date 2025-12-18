@@ -46,7 +46,7 @@ async def handle_chat(
 ):
     try:
         genai.configure(api_key=settings.GOOGLE_API_KEY)
-        model = genai.GenerativeModel('gemini-1.5-flash-latest')
+        model = genai.GenerativeModel('gemini-2.5-flash') 
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error al configurar la API de Gemini: {e}")
 
@@ -65,7 +65,7 @@ async def handle_chat(
         if active_employees:
             employees = active_employees
             employee_names = [emp.get("name", "Desconocido") for emp in employees]
-            employee_context = f"Este negocio funciona con citas por empleado. Los compas disponibles son: {', '.join(employee_names)}."
+            employee_context = f"Nota: Este negocio agendar citas por especialista. Disponibles: {', '.join(employee_names)}."
             full_conversation = request.message + " ".join([msg.parts[0] for msg in request.history])
             for emp in employees:
                 if emp.get("name", "").lower() in full_conversation.lower():
@@ -74,54 +74,74 @@ async def handle_chat(
                     break
         else:
             is_employee_mode = False
-            employee_context = "Este negocio no tiene empleados activos en este momento."
+            employee_context = "Nota: Actualmente no hay especialistas específicos activos."
 
     today_slots = await get_available_slots_for_chatbot(db, request.business_id, 0, selected_employee_id)
     tomorrow_slots = await get_available_slots_for_chatbot(db, request.business_id, 1, selected_employee_id)
     in_2_days_slots = await get_available_slots_for_chatbot(db, request.business_id, 2, selected_employee_id)
     
+    def format_slots(slots_data):
+        if not slots_data: return []
+        cleaned_slots = []
+        for s in slots_data:
+            if isinstance(s, dict):
+                cleaned_slots.append(s.get('time', str(s))) 
+            else:
+                cleaned_slots.append(str(s))
+        return cleaned_slots
+
+    t_slots_list = format_slots(today_slots.get('slots', []))
+    tm_slots_list = format_slots(tomorrow_slots.get('slots', []))
+    i2_slots_list = format_slots(in_2_days_slots.get('slots', []))
+
+    ui_slots_data = {
+        "today": {"date": today_slots['date'], "hours": t_slots_list},
+        "tomorrow": {"date": tomorrow_slots['date'], "hours": tm_slots_list},
+        "next_day": {"date": in_2_days_slots['date'], "hours": i2_slots_list}
+    }
+
     availability_context = ""
     if is_employee_mode and not selected_employee:
-        availability_context = "Para poder mostrarte los campos, primero tienes que decirme con cuál de los compas te gustaría la cita."
+        availability_context = "ADVERTENCIA: No muestres horarios todavía. Pide amablemente al usuario que seleccione un especialista primero."
     else:
-        employee_name_for_prompt = f" con {selected_employee.get('name')}" if selected_employee else ""
         availability_context = f"""
-        Esta es la disponibilidad de citas{employee_name_for_prompt} para los próximos días:
-        - Hoy ({today_slots['date']}): {', '.join(today_slots['slots']) if today_slots['slots'] else 'ya no queda campo.'}
-        - Mañana ({tomorrow_slots['date']}): {', '.join(tomorrow_slots['slots']) if tomorrow_slots['slots'] else 'no hay campo.'}
-        - Pasado mañana ({in_2_days_slots['date']}): {', '.join(in_2_days_slots['slots']) if in_2_days_slots['slots'] else 'tampoco hay campo.'}
+        DATOS DE DISPONIBILIDAD (SOLO PARA TU REFERENCIA INTERNA, NO LEER EN VOZ ALTA):
+        - Hoy ({today_slots['date']}): {', '.join(t_slots_list) if t_slots_list else 'AGOTADO'}
+        - Mañana ({tomorrow_slots['date']}): {', '.join(tm_slots_list) if tm_slots_list else 'AGOTADO'}
+        - Pasado mañana ({in_2_days_slots['date']}): {', '.join(i2_slots_list) if i2_slots_list else 'AGOTADO'}
         """
 
-    # --- INICIO DE LA MODIFICACIÓN DE PERSONALIDAD Y LÓGICA ---
     context = f"""
-    **Tu Personalidad:**
-    Eres un asistente virtual para "{business.get('name')}", con la personalidad de un "mae" de Costa Rica: amigable, servicial y "pura vida". Tu misión es que agendar una cita sea fácil y cómodo.
+    **Rol:** Eres un asistente virtual profesional y eficiente para el negocio "{business.get('name')}".
+    **Tono:** Formal pero cercano (usa "usted"). Cordial, breve y directo. Nada de jerga callejera ni "mae".
 
-    **Tu Única Misión:**
-    Tu propósito es agendar citas. Si te preguntan otra cosa, amablemente dices que en eso sí les quedas mal y vuelves al tema de la cita.
-
-    **Información Clave para Agendar:**
+    **Contexto:**
     {employee_context}
     {availability_context}
 
-    **Reglas de Conversación para Agendar (¡SIGUE ESTOS PASOS EN ORDEN ESTRICTO!):**
-    1.  **Saludo y Guía:** Saluda de forma amigable. Si el negocio requiere un empleado, pídelo. Si no, ve directo a la fecha y hora.
-    2.  **Confirmación de Cita:** Una vez que el usuario elige fecha y hora (y empleado si es necesario), haz una verificación final. Ejemplo: "¡Tuanis! Para confirmar: la cita el [FECHA] a las [HORA]. ¿Estamos bien así?".
-    3.  **Solicitud de Correo:** INMEDIATAMENTE DESPUÉS de que el usuario confirme la cita, haz esta pregunta: "¿Con mucho gusto! ¿A cuál correo electrónico le envío la confirmación?".
-    4.  **Verificación del Correo (NUEVO PASO CRÍTICO):** Cuando el usuario te dé su correo, debes mostrárselo y pedir una última confirmación. Tu respuesta DEBE ser: "Ok, lo envío a [correo del usuario]. ¿Es correcto?".
-    5.  **Comando de Agendamiento (¡MUY IMPORTANTE!):** SOLO DESPUÉS de que el usuario responda afirmativamente a la verificación del correo (paso 4), tu ÚNICA respuesta debe ser el comando especial, sin añadir ni una sola palabra más:
-        `[BOOK_APPOINTMENT:fecha="YYYY-MM-DD",hora="HH:MM",empleado="NOMBRE_DEL_EMPLEADO",email="correo@ejemplo.com"]`
-        (Si no se usa empleado, omites ese campo).
-    6.  **Honestidad:** Nunca inventes horarios.
-    """
-    # --- FIN DE LA MODIFICACIÓN DE PERSONALIDAD Y LÓGICA ---
+    **REGLAS ESTRICTAS DE RESPUESTA (SÍGUELAS O EL SISTEMA FALLARÁ):**
 
-    chat_history = [
-        {"role": "user", "parts": [context]},
-    ]
+    1.  **PROHIBIDO LEER LISTAS DE HORAS:** Cuando te pregunten por disponibilidad, NUNCA listes todas las horas en el texto (ej: "tengo 9:00, 9:30, 10:00..."). Eso suena robótico.
+        * **Correcto:** "Claro, tenemos amplia disponibilidad para hoy en la mañana y tarde. Aquí le muestro las opciones."
+        * **Correcto:** "Para mañana solo me quedan un par de espacios en la tarde."
+        * **Incorrecto:** "Tengo citas a las 8:00, 8:30, 9:00, 9:30..." (ESTO ESTÁ PROHIBIDO).
+
+    2.  **Flujo de Agendamiento:**
+        * Si falta el especialista (y el negocio lo requiere), pídelo cortésmente.
+        * Si ya tienes fecha y hora, confirma: "Perfecto, ¿le agendo la cita para el [FECHA] a las [HORA] con [ESPECIALISTA]?"
+        * Pide el correo electrónico para la confirmación.
+        * Muestra el correo para verificar: "¿Es correcto el correo [email]?"
+    
+    3.  **Comando Final:** Solo cuando el usuario confirme el correo, responde ÚNICAMENTE con:
+        `[BOOK_APPOINTMENT:fecha="YYYY-MM-DD",hora="HH:MM",empleado="NOMBRE",email="correo"]`
+
+    4.  **Manejo de Errores:** Si el usuario pide una hora que NO está en tu lista de "DATOS DE DISPONIBILIDAD", dile amablemente que esa hora ya está ocupada y sugiere otra cercana.
+    """
+    # -------------------------------------------------------------------
+
+    chat_history = [{"role": "user", "parts": [context]}]
     for msg in request.history:
         chat_history.append({"role": msg.role, "parts": msg.parts})
-    
     chat_history.append({"role": "user", "parts": [request.message]})
 
     try:
@@ -146,31 +166,26 @@ async def handle_chat(
             
             try:
                 appointment_dt = datetime.strptime(f"{date_str} {time_str}", "%Y-%m-%d %H:%M")
-
                 new_appointment = await crud_appointment.create(
                     db=db, business_id=request.business_id, user_id=str(current_user.id),
                     appointment_time=appointment_dt, employee_id=final_employee_id_for_booking
                 )
                 
                 appointment_id = str(new_appointment["_id"])
-                
                 details = {
                     "id": appointment_id, "user_name": current_user.full_name or current_user.email,
                     "business_name": business.get("name"), "date": appointment_dt.strftime("%d/%m/%Y"),
                     "time": appointment_dt.strftime("%H:%M"), "address": business.get("address"), "status": "confirmed",
                 }
+                
                 qr_png = generate_qr_code_as_bytes(appointment_id).getvalue()
                 pdf_bytes = generate_appointment_pdf_as_bytes({**details, "qr_png": qr_png}, cancelled=False)
                 
                 await run_in_threadpool(
-                    send_confirmation_email,
-                    user_email=target_email,
-                    details=details, pdf_bytes=pdf_bytes,
+                    send_confirmation_email, user_email=target_email, details=details, pdf_bytes=pdf_bytes,
                 )
                 
-                confirmation_msg = f"¡Listo, pura vida! Su cita quedó para el {date_str} a las {time_str}"
-                if employee_name: confirmation_msg += f" con {employee_name}"
-                confirmation_msg += f". Ya le mandé la confirmación al correo {target_email}. Ahí en 'Mis Citas' puede revisarla cuando quiera."
+                confirmation_msg = f"Cita confirmada para el {date_str} a las {time_str}. Se ha enviado el comprobante a {target_email}. ¡Gracias por preferirnos!"
                 
                 return {
                     "response": confirmation_msg, 
@@ -179,11 +194,14 @@ async def handle_chat(
                 }
 
             except Exception as e:
-                print(f"Error al crear la cita o enviar correo: {e}")
-                error_response = "¡Uy, mae! Algo falló en el sistema y no pude agendar la cita. ¿Lo intentamos otra vez?"
-                return {"response": error_response}
+                print(f"Error: {e}")
+                return {"response": "Disculpe, hubo un error técnico al procesar su cita. ¿Podría intentarlo nuevamente?"}
         
-        return {"response": model_response_text}
+       
+        return {
+            "response": model_response_text,
+            "slots_view": ui_slots_data 
+        }
 
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Error al comunicarse con el modelo de IA: {e}")
+        raise HTTPException(status_code=500, detail=f"Error IA: {e}")

@@ -5,31 +5,38 @@ import { useAuth } from '@/hooks/useAuth';
 import { ExtendedPage } from '@/App';
 import { LocationDisplay } from '@/components/LocationDisplay';
 import { Chatbot } from '@/components/Chatbot';
-import AutoAwesomeIcon from '@mui/icons-material/AutoAwesome';
 
-import {
-  Box, Typography, Button, Paper, CircularProgress, Divider, TextField, IconButton,
-  Dialog, DialogTitle, DialogContent, DialogActions, Alert, MenuItem, Select,
-  FormControl, InputLabel, Stack, Avatar, Rating, Chip
-} from '@mui/material';
-import { keyframes } from '@mui/system';
-import type { SelectChangeEvent } from '@mui/material/Select';
+// --- ICONOS ---
+import AutoAwesomeIcon from '@mui/icons-material/AutoAwesome';
 import ArrowBackIosNewIcon from '@mui/icons-material/ArrowBackIosNew';
 import ArrowForwardIosIcon from '@mui/icons-material/ArrowForwardIos';
-import CalendarMonthIcon from '@mui/icons-material/CalendarMonth';
 import PersonIcon from '@mui/icons-material/Person';
 import AccessTimeIcon from '@mui/icons-material/AccessTime';
 import StarIcon from '@mui/icons-material/Star';
 import ReviewsIcon from '@mui/icons-material/Reviews';
 import VerifiedUserIcon from '@mui/icons-material/VerifiedUser';
 import StorefrontIcon from '@mui/icons-material/Storefront';
+import EventAvailableIcon from '@mui/icons-material/EventAvailable';
 
+// --- COMPONENTES UI ---
+import {
+  Box, Typography, Button, Paper, CircularProgress, Divider, TextField, IconButton,
+  Dialog, DialogTitle, DialogContent, DialogActions, Alert, MenuItem, Select,
+  FormControl, Stack, Avatar, Rating, Chip,
+  Grid, // Usamos Grid (que en tu versión parece ser la nueva Grid2)
+  useTheme, useMediaQuery, Fade, Zoom
+} from '@mui/material';
+import { keyframes } from '@mui/system';
+import type { SelectChangeEvent } from '@mui/material/Select';
+
+// --- HELPERS ---
 const safeId = (obj: { id?: string; _id?: string } | null | undefined) =>
   (obj?.id as string) || (obj?._id as string) || '';
 
 const bizIdOf = (b?: { id?: string; _id?: string }) =>
   (b?.id as string) || (b?._id as string) || '';
 
+// --- TIPOS ---
 type ReviewReply = {
   text: string;
   role: 'owner' | 'admin';
@@ -52,10 +59,11 @@ type UserLite = {
   _id?: string;
   full_name?: string;
   email?: string;
-  profile_picture_url?: string; 
+  profile_picture_url?: string;
   role?: 'usuario' | 'dueño' | 'admin';
 };
 
+// --- DIÁLOGO DE CONFIRMACIÓN DE CITA ---
 const ConfirmationDialog: React.FC<{
   appointment: Appointment;
   onClose: () => void;
@@ -127,12 +135,16 @@ const ConfirmationDialog: React.FC<{
   );
 };
 
+// --- MODAL DE RESERVA (CORREGIDO PARA TU VERSIÓN DE MUI) ---
 const BookingModal: React.FC<{
   business: Business;
   onClose: () => void;
   onBookingSuccess: (appointment: Appointment) => void;
 }> = ({ business, onClose, onBookingSuccess }) => {
   const { token } = useAuth();
+  const theme = useTheme();
+  const isMobile = useMediaQuery(theme.breakpoints.down('md'));
+
   const needEmployee = (business as any).appointment_mode === 'por_empleado';
 
   const [selectedDate, setSelectedDate] = useState<string>(() => new Date().toISOString().slice(0, 10));
@@ -163,7 +175,6 @@ const BookingModal: React.FC<{
         setEmployees(data);
       } catch (e: any) {
         setEmployees([]);
-        console.error(e);
       }
     };
     void fetchEmployees();
@@ -184,8 +195,13 @@ const BookingModal: React.FC<{
         const query = new URLSearchParams({ date: selectedDate });
         if (needEmployee && employeeId) query.set('employee_id', employeeId);
         const res = await fetch(`${API_BASE_URL}/businesses/${bizId}/available-slots?${query.toString()}`);
-        if (!res.ok) throw new Error('No se pudo cargar la disponibilidad para este día.');
-        setAvailableSlots(await res.json());
+        if (!res.ok) throw new Error('No se pudo cargar la disponibilidad.');
+
+        const data = await res.json();
+        // Limpiamos los datos para asegurarnos de tener solo strings
+        const cleanData = Array.isArray(data) ? data.map((s: any) => typeof s === 'string' ? s : s.time) : [];
+        setAvailableSlots(cleanData);
+
       } catch (err: any) {
         setAvailableSlots([]);
         setError(err.message);
@@ -225,109 +241,203 @@ const BookingModal: React.FC<{
     }
   };
 
+  const selectedEmployeeName = employees.find(e => safeId(e as any) === employeeId) as any;
+
   return (
     <Dialog
       open
       onClose={onClose}
+      maxWidth="md"
+      fullWidth
       PaperProps={{
-        onClick: (e: React.MouseEvent<HTMLDivElement>) => e.stopPropagation(),
-        elevation: 8,
+        elevation: 24,
+        sx: { borderRadius: 4, overflow: 'hidden' }
       }}
     >
-      <DialogTitle sx={{ fontWeight: 800 }}>{`Reservar en ${(business as any).name}`}</DialogTitle>
-      <DialogContent>
-        <Typography color="text.secondary" variant="body2" sx={{ mb: 2 }}>
-          Completa los pasos para confirmar tu cita
-        </Typography>
-        <Divider />
+      <Grid container sx={{ height: isMobile ? 'auto' : '550px' }}>
 
-        {error && <Alert severity="error" sx={{ my: 2 }}>{error}</Alert>}
+        {/* COLUMNA IZQUIERDA: RESUMEN VISUAL (CORREGIDO: size={{...}} en lugar de item xs={...}) */}
+        <Grid size={{ xs: 12, md: 4 }} sx={{
+          bgcolor: 'primary.main',
+          color: 'white',
+          p: 4,
+          display: 'flex',
+          flexDirection: 'column',
+          justifyContent: 'space-between',
+          backgroundImage: 'linear-gradient(135deg, rgba(255,255,255,0.1) 0%, rgba(255,255,255,0) 100%)'
+        }}>
+          <Box>
+            <Typography variant="overline" sx={{ opacity: 0.8, letterSpacing: 1 }}>
+              RESERVANDO EN
+            </Typography>
+            <Typography variant="h5" fontWeight={800} sx={{ mb: 2, lineHeight: 1.2 }}>
+              {(business as any).name}
+            </Typography>
+            <Divider sx={{ bgcolor: 'rgba(255,255,255,0.2)', mb: 3 }} />
 
-        <Box sx={{ mb: 3 }}>
-          <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 1 }}>
-            <CalendarMonthIcon /><Typography fontWeight={700}>1. Elige una fecha</Typography>
+            <Stack spacing={2}>
+              <Box>
+                <Typography variant="caption" sx={{ opacity: 0.8 }}>FECHA SELECCIONADA</Typography>
+                <Typography variant="h6" fontWeight={600}>
+                  {new Date(selectedDate + 'T00:00:00').toLocaleDateString('es-ES', { weekday: 'long', day: 'numeric', month: 'long' })}
+                </Typography>
+              </Box>
+
+              {needEmployee && (
+                <Box>
+                  <Typography variant="caption" sx={{ opacity: 0.8 }}>ESPECIALISTA</Typography>
+                  <Typography variant="h6" fontWeight={600}>
+                    {selectedEmployeeName ? selectedEmployeeName.name : 'Sin seleccionar'}
+                  </Typography>
+                </Box>
+              )}
+
+              {selectedSlot && (
+                <Fade in>
+                  <Box sx={{ bgcolor: 'white', color: 'primary.main', p: 1.5, borderRadius: 2, textAlign: 'center' }}>
+                    <Typography variant="caption" fontWeight="bold" display="block">HORA ELEGIDA</Typography>
+                    <Typography variant="h4" fontWeight={800}>{selectedSlot}</Typography>
+                  </Box>
+                </Fade>
+              )}
+            </Stack>
           </Box>
-          <TextField
-            type="date"
-            value={selectedDate}
-            onChange={handleDateChange}
-            fullWidth
-            size="medium"
-          />
-        </Box>
 
-        {needEmployee && (
-          <Box sx={{ mb: 3 }}>
-            <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 1 }}>
-              <PersonIcon /><Typography fontWeight={700}>2. Elige un empleado</Typography>
-            </Box>
+          <Box sx={{ mt: 4, textAlign: 'center', opacity: 0.7 }}>
+            <EventAvailableIcon sx={{ fontSize: 60 }} />
+          </Box>
+        </Grid>
 
-            <FormControl fullWidth>
-              <InputLabel id="employee-select-label">Empleado</InputLabel>
-              <Select
-                labelId="employee-select-label"
-                value={employeeId}
-                label="Empleado"
-                onChange={handleEmployeeChange}
-              >
-                {employees.length === 0 && (
-                  <MenuItem value="" disabled>No hay empleados activos</MenuItem>
+        {/* COLUMNA DERECHA: FORMULARIO (CORREGIDO: size={{...}} en lugar de item xs={...}) */}
+        <Grid size={{ xs: 12, md: 8 }} sx={{ p: { xs: 2, md: 4 }, overflowY: 'auto' }}>
+          <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 3 }}>
+            <Typography variant="h5" fontWeight={700} color="text.primary">
+              Configura tu Cita
+            </Typography>
+          </Box>
+
+          {error && <Alert severity="error" sx={{ mb: 3 }}>{error}</Alert>}
+
+          <Stack spacing={4}>
+            {/* Paso 1: Fecha y Empleado */}
+            <Stack direction={{ xs: 'column', sm: 'row' }} spacing={2}>
+              <Box flex={1}>
+                <Typography fontWeight={600} gutterBottom>Fecha</Typography>
+                <TextField
+                  type="date"
+                  value={selectedDate}
+                  onChange={handleDateChange}
+                  fullWidth
+                  variant="outlined"
+                  sx={{ '& input': { cursor: 'pointer' } }}
+                />
+              </Box>
+              {needEmployee && (
+                <Box flex={1}>
+                  <Typography fontWeight={600} gutterBottom>Especialista</Typography>
+                  <FormControl fullWidth>
+                    <Select
+                      value={employeeId}
+                      onChange={handleEmployeeChange}
+                      displayEmpty
+                      renderValue={(selected) => {
+                        if (!selected) return <Typography color="text.secondary">Selecciona...</Typography>;
+                        const emp = employees.find(e => safeId(e as any) === selected);
+                        return (emp as any)?.name;
+                      }}
+                    >
+                      {employees.map((emp) => (
+                        <MenuItem key={safeId(emp as any)} value={safeId(emp as any)}>
+                          {(emp as any).name}
+                        </MenuItem>
+                      ))}
+                    </Select>
+                  </FormControl>
+                </Box>
+              )}
+            </Stack>
+
+            {/* Paso 2: Horarios */}
+            <Box>
+              <Typography fontWeight={600} gutterBottom sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                <AccessTimeIcon fontSize="small" color="action" /> Disponibilidad
+              </Typography>
+
+              <Paper variant="outlined" sx={{ p: 2, bgcolor: '#f9fafb', borderRadius: 2, minHeight: 150 }}>
+                {needEmployee && !employeeId ? (
+                  <Box display="flex" flexDirection="column" alignItems="center" justifyContent="center" height="100%" py={3}>
+                    <PersonIcon sx={{ fontSize: 40, color: 'text.disabled', mb: 1 }} />
+                    <Typography color="text.secondary">Selecciona un especialista primero</Typography>
+                  </Box>
+                ) : isLoadingSlots ? (
+                  <Box display="flex" justifyContent="center" py={4}><CircularProgress /></Box>
+                ) : availableSlots.length === 0 ? (
+                  <Box display="flex" flexDirection="column" alignItems="center" justifyContent="center" height="100%" py={3}>
+                    <Typography color="text.secondary">No hay citas disponibles para esta fecha.</Typography>
+                  </Box>
+                ) : (
+                  <Box sx={{
+                    display: 'grid',
+                    gridTemplateColumns: 'repeat(auto-fill, minmax(85px, 1fr))',
+                    gap: 1.5
+                  }}>
+                    {availableSlots.map((slot) => (
+                      <Zoom in key={slot}>
+                        <Button
+                          variant={selectedSlot === slot ? 'contained' : 'outlined'}
+                          onClick={() => setSelectedSlot(slot)}
+                          sx={{
+                            borderRadius: 3,
+                            py: 1,
+                            border: selectedSlot === slot ? 'none' : '1px solid #e0e0e0',
+                            bgcolor: selectedSlot === slot ? 'primary.main' : 'white',
+                            color: selectedSlot === slot ? 'white' : 'text.primary',
+                            boxShadow: selectedSlot === slot ? 4 : 0,
+                            '&:hover': {
+                              bgcolor: selectedSlot === slot ? 'primary.dark' : '#f0f0f0',
+                              transform: 'translateY(-2px)',
+                              boxShadow: 2
+                            },
+                            transition: 'all 0.2s ease'
+                          }}
+                        >
+                          {slot}
+                        </Button>
+                      </Zoom>
+                    ))}
+                  </Box>
                 )}
-                {employees.map((emp) => {
-                  const id = safeId(emp as any);
-                  return <MenuItem key={id} value={id}>{(emp as any).name}</MenuItem>;
-                })}
-              </Select>
-            </FormControl>
-          </Box>
-        )}
-
-        <Box>
-          <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 1 }}>
-            <AccessTimeIcon /><Typography fontWeight={700}>3. Elige una hora disponible</Typography>
-          </Box>
-
-          {needEmployee && !employeeId ? (
-            <Alert severity="info">Selecciona un empleado para ver la disponibilidad.</Alert>
-          ) : isLoadingSlots ? (
-            <CircularProgress sx={{ my: 2 }} />
-          ) : (
-            <Box sx={{
-              display: 'grid',
-              gridTemplateColumns: 'repeat(auto-fill, minmax(110px, 1fr))',
-              gap: 1.2,
-              my: 1.5,
-              maxHeight: 240,
-              overflowY: 'auto'
-            }}>
-              {availableSlots.length > 0 ? availableSlots.map((slot) => (
-                <Button
-                  key={slot}
-                  variant={selectedSlot === slot ? 'contained' : 'outlined'}
-                  onClick={() => setSelectedSlot(slot)}
-                >
-                  {slot}
-                </Button>
-              )) : <Typography color="text.secondary">No hay horarios disponibles.</Typography>}
+              </Paper>
             </Box>
-          )}
-        </Box>
-      </DialogContent>
+          </Stack>
 
-      <DialogActions sx={{ p: 2 }}>
-        <Button onClick={onClose} disabled={isLoading}>Cancelar</Button>
-        <Button
-          variant="contained"
-          onClick={handleBooking}
-          disabled={isLoading || !selectedSlot || (needEmployee && !employeeId)}
-        >
-          {isLoading ? 'Confirmando...' : 'Confirmar Cita'}
-        </Button>
-      </DialogActions>
+          {/* Acciones */}
+          <Box sx={{ mt: 5, display: 'flex', justifyContent: 'flex-end', gap: 2 }}>
+            <Button onClick={onClose} color="inherit" sx={{ px: 3 }}>
+              Cancelar
+            </Button>
+            <Button
+              variant="contained"
+              size="large"
+              onClick={handleBooking}
+              disabled={isLoading || !selectedSlot || (needEmployee && !employeeId)}
+              sx={{
+                px: 4,
+                borderRadius: 2,
+                fontWeight: 'bold',
+                boxShadow: '0 4px 14px 0 rgba(0,118,255,0.39)'
+              }}
+            >
+              {isLoading ? 'Confirmando...' : 'CONFIRMAR CITA'}
+            </Button>
+          </Box>
+        </Grid>
+      </Grid>
     </Dialog>
   );
 };
 
+// --- SECCIÓN DE RESEÑAS ---
 const glowingAnimation = keyframes`
   0% { box-shadow: 0 0 5px #007BFF, 0 0 10px #007BFF, 0 0 15px #007BFF; }
   50% { box-shadow: 0 0 10px #0056b3, 0 0 20px #0056b3, 0 0 30px #0056b3; }
@@ -355,15 +465,10 @@ const ReviewsSection: React.FC<{
     const res = await fetch(url, init);
     const text = await res.text();
     let data: any = {};
-    try { data = text ? JSON.parse(text) : {}; } catch {  }
+    try { data = text ? JSON.parse(text) : {}; } catch { }
     if (!res.ok) {
       const detail = data?.detail ?? data?.message ?? text ?? 'Error';
-      const msg =
-        typeof detail === 'string'
-          ? detail
-          : Array.isArray(detail)
-          ? detail.map((d: any) => d.msg || d.error || d.detail).join(' | ')
-          : JSON.stringify(detail);
+      const msg = typeof detail === 'string' ? detail : JSON.stringify(detail);
       throw new Error(msg);
     }
     return data;
@@ -371,15 +476,14 @@ const ReviewsSection: React.FC<{
 
   const checkEligibility = useCallback(async () => {
     if (!token) {
-        setCanReview(false);
-        return;
+      setCanReview(false);
+      return;
     }
     if (user?.role === 'admin' || user?.role === 'dueño') {
-        setCanReview(true);
-        setAppointmentId(null);
-        return;
+      setCanReview(true);
+      setAppointmentId(null);
+      return;
     }
-
     try {
       const elig = await fetchJSON(`${API_BASE_URL}/reviews/eligibility/${businessId}`, {
         headers: { Authorization: `Bearer ${token}` },
@@ -391,7 +495,7 @@ const ReviewsSection: React.FC<{
       setAppointmentId(null);
     }
   }, [businessId, token, user?.role]);
-  
+
   const load = useCallback(async () => {
     setLoading(true);
     setError('');
@@ -406,9 +510,9 @@ const ReviewsSection: React.FC<{
           const ru = await fetch(`${API_BASE_URL}/users/${uid}`);
           if (ru.ok) {
             const u = await ru.json();
-            entries[uid] = u as UserLite; 
+            entries[uid] = u as UserLite;
           }
-        } catch {  }
+        } catch { }
       }));
       setUsersMap(entries);
     } catch (e: any) {
@@ -418,7 +522,7 @@ const ReviewsSection: React.FC<{
     }
   }, [REVIEWS_LIST_URL]);
 
-  useEffect(() => { 
+  useEffect(() => {
     void load();
     void checkEligibility();
   }, [load, checkEligibility]);
@@ -434,8 +538,8 @@ const ReviewsSection: React.FC<{
     if (!rating || rating < 1) return alert('Selecciona una puntuación.');
     if (!comment.trim()) return alert('Escribe un comentario.');
     if (user?.role === 'usuario' && !appointmentId) {
-        setError('No pudimos validar una cita elegible para este negocio.'); 
-        return; 
+      setError('No pudimos validar una cita elegible para este negocio.');
+      return;
     }
 
     setSubmitting(true);
@@ -523,7 +627,7 @@ const ReviewsSection: React.FC<{
           </Stack>
         </Paper>
       )}
-      
+
       {!canReview && user && user.role === 'usuario' && (
         <Alert severity="info" sx={{ mb: 2 }}>
           Solo puedes opinar si ya tuviste una cita completada con este negocio.
@@ -544,7 +648,7 @@ const ReviewsSection: React.FC<{
               <Paper key={rid} variant="outlined" sx={{ p: 1.5, borderRadius: 2 }}>
                 <Stack direction="row" spacing={1.5}>
                   <Avatar
-                    src={u?.profile_picture_url ?? undefined} 
+                    src={u?.profile_picture_url ?? undefined}
                     alt={u?.full_name || 'Usuario'}
                   >
                     {(u?.full_name || u?.email || 'U')?.charAt(0).toUpperCase()}
@@ -554,7 +658,7 @@ const ReviewsSection: React.FC<{
                       <Typography fontWeight={700}>{u?.full_name || u?.email || 'Usuario'}</Typography>
                       <RoleChip role={u?.role} />
                       <Rating value={r.rating} readOnly size="small" />
-                      <Typography variant="caption" color="text.secondary" sx={{ml: 'auto'}}>
+                      <Typography variant="caption" color="text.secondary" sx={{ ml: 'auto' }}>
                         {when.toLocaleDateString('es-ES', { day: '2-digit', month: 'short', year: 'numeric' })}
                       </Typography>
                     </Stack>
@@ -577,8 +681,8 @@ const ReviewsSection: React.FC<{
                         }}
                       >
                         <Stack direction="row" alignItems="center" spacing={1}>
-                          {r.reply.role === 'admin' && <VerifiedUserIcon color="primary" fontSize="small"/>}
-                          {r.reply.role === 'owner' && <StorefrontIcon color="action" fontSize="small"/>}
+                          {r.reply.role === 'admin' && <VerifiedUserIcon color="primary" fontSize="small" />}
+                          {r.reply.role === 'owner' && <StorefrontIcon color="action" fontSize="small" />}
                           <Typography variant="caption" fontWeight={700}>
                             {r.reply.role === 'admin' ? 'Respuesta del Administrador' : 'Respuesta del Propietario'}
                           </Typography>
@@ -599,6 +703,7 @@ const ReviewsSection: React.FC<{
   );
 };
 
+// --- PÁGINA PRINCIPAL: DETALLES DEL NEGOCIO ---
 interface BusinessDetailsPageProps {
   businessId: string;
   navigateTo: (page: ExtendedPage) => void;
@@ -644,7 +749,6 @@ export const BusinessDetailsPage: React.FC<BusinessDetailsPageProps> = ({ busine
   const goToPrevious = () => setCurrentImageIndex(prev => (prev === 0 ? allImages.length - 1 : prev - 1));
   const goToNext = () => setCurrentImageIndex(prev => (prev === allImages.length - 1 ? 0 : prev + 1));
 
-
   if (isLoading) return <Box sx={{ textAlign: 'center', p: 4 }}><CircularProgress /></Box>;
   if (!business) return <Box sx={{ textAlign: 'center', p: 4 }}><Typography>Negocio no encontrado.</Typography></Box>;
 
@@ -667,7 +771,8 @@ export const BusinessDetailsPage: React.FC<BusinessDetailsPageProps> = ({ busine
           navigateTo={navigateTo}
         />
       )}
-      
+
+      {/* Botón Flotante del Chatbot */}
       <IconButton
         color="primary"
         sx={{
@@ -688,12 +793,12 @@ export const BusinessDetailsPage: React.FC<BusinessDetailsPageProps> = ({ busine
       >
         <AutoAwesomeIcon fontSize="large" />
       </IconButton>
-      
+
       {showChatbot && token && (
-        <Chatbot 
-          businessId={businessId} 
-          businessName={(business as any).name} 
-          navigateTo={navigateTo} 
+        <Chatbot
+          businessId={businessId}
+          businessName={(business as any).name}
+          navigateTo={navigateTo}
         />
       )}
 
@@ -704,6 +809,7 @@ export const BusinessDetailsPage: React.FC<BusinessDetailsPageProps> = ({ busine
         p: { xs: 2, md: 4 },
         borderRadius: 4
       }}>
+        {/* Carrusel de Imágenes */}
         <Box sx={{ position: 'relative', width: '100%', height: { xs: 300, md: 450 }, borderRadius: 2, overflow: 'hidden' }}>
           {allImages.length > 1 && (
             <>
@@ -738,6 +844,13 @@ export const BusinessDetailsPage: React.FC<BusinessDetailsPageProps> = ({ busine
             size="large"
             disabled={!canBook}
             title={!canBook ? 'Este negocio no ha configurado su horario de citas' : 'Reservar una cita'}
+            sx={{
+              py: 1.5, px: 4,
+              borderRadius: 2,
+              fontWeight: 'bold',
+              fontSize: '1.1rem',
+              boxShadow: 4
+            }}
             onClick={() => {
               if (!token) {
                 alert('Debes iniciar sesión para reservar.');

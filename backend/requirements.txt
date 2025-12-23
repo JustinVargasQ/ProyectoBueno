@@ -14,7 +14,7 @@ google-api-python-client==2.155.0
 google-auth-httplib2==0.2.0
 google-auth-oauthlib==1.2.1
 google-cloud-speech==2.27.0
-google-cloud-texttospeech==2.17.3
+google-cloud-texttospeech==2.18.0
 fpdf2==2.8.1
 qrcode[pil]==7.4.2
 fastapi-mail==1.4.1
